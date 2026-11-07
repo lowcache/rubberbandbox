@@ -32,6 +32,11 @@ class Door:
         self._adapters = dict(adapters)
         self._clock = clock
 
+    def set_kind(self, spec: KindSpec) -> None:
+        if spec.name not in self._kinds:
+            raise KeyError(f"no mounted kind {spec.name!r}")
+        self._kinds[spec.name] = spec
+
     def cross(self, egress: Egress, auth: Authorization, send_at: float | None = None) -> tuple[str, str]:
         """Return ('sent'|'scheduled'|'refused'|'failed', reason). For the lane, the slot comes
         from the receipt itself; the caller's send_at is ignored."""

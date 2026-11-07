@@ -71,6 +71,7 @@ class PublicLane:
                 (route.destination, latest, route.cost),  # latest possible delivery
             )
             cur = db.execute(
-                "INSERT INTO receipts (digest, send_at, expires_at) VALUES (?,?,?)", (egress.digest, send_at, latest)
+                "INSERT INTO receipts (digest, send_at, expires_at, kind) VALUES (?,?,?,?)",
+                (egress.digest, send_at, latest, egress.kind),
             )
         return Authorization("lane", f"R{cur.lastrowid}"), send_at, "admitted"

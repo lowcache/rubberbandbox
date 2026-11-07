@@ -15,6 +15,19 @@ from .labels import (
 )
 from .manifest import EFFECTS, ROLES, ToolManifest, compile_kind, compile_kinds, conservative, generated_schema
 from .public_lane import LaneConfig
+from .registry import (
+    OVERRIDABLE,
+    BonesError,
+    Change,
+    ManifestRegistry,
+    Problem,
+    ToolDescriptor,
+    bones,
+    diff,
+    explain,
+    security_view,
+    view_hash,
+)
 from .sandbox import ManualClock, Mount, Outcome, Sandbox
 from .types import (
     Authorization,

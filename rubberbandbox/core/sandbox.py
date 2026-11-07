@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import random
 from dataclasses import dataclass
 from typing import Callable, Mapping, Sequence
@@ -150,6 +151,32 @@ class Sandbox:
 
     def tick(self) -> list[tuple[str, str]]:
         return self._door.tick()
+
+    # ---- manifest changes (driven by the registry) ----
+
+    def set_kind(self, spec: KindSpec) -> None:
+        """Swap the semantics of a mounted kind, in the bones and the door together."""
+        self._door.set_kind(spec)
+        self.kinds[spec.name] = spec
+
+    def invalidate_kind(self, kind: str) -> None:
+        """Fail closed: every grant, approval, lane receipt and scheduled send issued for `kind`
+        under earlier semantics stops authorizing anything."""
+        now = self.clock()
+        with self.store.tx() as db:
+            grants = [gid for gid, ks in db.execute("SELECT id, kinds FROM grants WHERE ended=0")
+                      if kind in json.loads(ks)]
+            approvals = [aid for aid, blob in db.execute(
+                "SELECT id, egress FROM approvals WHERE status IN ('pending','approved') AND consumed=0")
+                if json.loads(blob)["kind"] == kind]
+            scheduled = [sid for sid, blob in db.execute("SELECT id, egress FROM scheduled WHERE status='pending'")
+                         if json.loads(blob)["kind"] == kind]
+            db.executemany("UPDATE grants SET ended=1 WHERE id=?", [(i,) for i in grants])
+            db.executemany("UPDATE approvals SET status='invalidated' WHERE id=?", [(i,) for i in approvals])
+            db.executemany("UPDATE scheduled SET status='invalidated' WHERE id=?", [(i,) for i in scheduled])
+            receipts = db.execute("UPDATE receipts SET consumed=1 WHERE kind=? AND consumed=0", (kind,)).rowcount
+        self.store.audit(now, "kind.invalidated", kind=kind, grants=len(grants), approvals=len(approvals),
+                         scheduled=len(scheduled), receipts=receipts)
 
     # ---- inbound ----
 
