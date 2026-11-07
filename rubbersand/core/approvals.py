@@ -75,9 +75,11 @@ class Approvals:
         egress = self.egress_of(aid)
         if egress is None:
             raise KeyError(aid)
-        self.store.db.execute("UPDATE approvals SET status='approved' WHERE id=? AND status='pending'", (parse_id(aid, "A"),))
-        self.store.set_destination(egress.destination.data, "approved", now)
-        self.store.audit(now, "approve", approval=aid)
+        cur = self.store.db.execute(
+            "UPDATE approvals SET status='approved' WHERE id=? AND status='pending'", (parse_id(aid, "A"),))
+        if cur.rowcount:  # only a real state change is an approval; replays are left to the door
+            self.store.set_destination(egress.destination.data, "approved", now)
+            self.store.audit(now, "approve", approval=aid)
         return Authorization("approval", aid)
 
     def deny(self, aid: str, now: float) -> None:
