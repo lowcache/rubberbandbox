@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 
-from rubbersand.core import Hands, ManualClock, Mount, Sandbox
+from rubberbandbox.core import Hands, ManualClock, Mount, Sandbox
 
 from .clerk import KeywordClerk
 from .hands import InjectedHands, ScriptedHands

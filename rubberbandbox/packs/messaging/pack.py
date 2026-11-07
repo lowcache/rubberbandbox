@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Mapping, Sequence
 
-from rubbersand.core import (
+from rubberbandbox.core import (
     EXTERNAL_PRIVATE,
     DecideContext,
     Egress,
@@ -63,6 +63,7 @@ requested_action: call or visit only if they explicitly ask for a phone call or 
 visit; reply if they ask a question or expect an answer; otherwise none."""
 
 _E164 = re.compile(r"\+\d{8,15}")
+_MAILBOX = re.compile(r"[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+")  # plausible addr-spec; not a full RFC 5322 parser
 _SLOT = re.compile(r"\{([a-z_]+)\}")
 
 
@@ -114,7 +115,7 @@ class MessagingPack:
             return None
         if not isinstance(froms, list) or len(froms) != 1 or not isinstance(froms[0], str):
             return None
-        if not isinstance(env, str) or not env or env.lower() != froms[0].lower():
+        if not isinstance(env, str) or not _MAILBOX.fullmatch(env) or env.lower() != froms[0].lower():
             return None
         if not isinstance(event.origin, str) or event.origin.lower() != env.lower():
             return None

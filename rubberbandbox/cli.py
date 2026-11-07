@@ -1,10 +1,10 @@
-"""python -m rubbersand.cli attacks [path] | clean [path] [--clerk claude|codex] | adversarial [path] [--clerk claude|codex] | demo [--clerk claude|codex]"""
+"""python -m rubberbandbox.cli attacks [path] | clean [path] [--clerk claude|codex] | adversarial [path] [--clerk claude|codex] | demo [--clerk claude|codex]"""
 
 from __future__ import annotations
 
 import sys
 
-from rubbersand.packs.messaging.corpus import run_adversarial, run_attacks, run_clean
+from rubberbandbox.packs.messaging.corpus import run_adversarial, run_attacks, run_clean
 
 
 def main(argv: list[str]) -> int:
@@ -18,30 +18,30 @@ def main(argv: list[str]) -> int:
         print(f"\n{len(results) - failed}/{len(results)} attack cases behave as specified")
         return 1 if failed else 0
     if cmd == "demo":
-        from rubbersand.demo import run
+        from rubberbandbox.demo import run
 
         clerk = None
         if "--clerk" in argv:
-            from rubbersand.packs.messaging import CLERK_GUIDE, SCHEMA
+            from rubberbandbox.packs.messaging import CLERK_GUIDE, SCHEMA
 
             name = argv[argv.index("--clerk") + 1]
             if name == "codex":
-                from rubbersand.clerks.codex import CodexClerk as Clerk
+                from rubberbandbox.clerks.codex import CodexClerk as Clerk
             else:
-                from rubbersand.clerks.claude import ClaudeClerk as Clerk
+                from rubberbandbox.clerks.claude import ClaudeClerk as Clerk
             clerk = Clerk(SCHEMA, CLERK_GUIDE)
         return 1 if run(clerk)["leaked"] else 0
     if cmd in ("clean", "adversarial"):
         args = [a for a in argv[1:] if not a.startswith("--")]
         clerk = None
         if "--clerk" in argv:
-            from rubbersand.packs.messaging import CLERK_GUIDE, SCHEMA
+            from rubberbandbox.packs.messaging import CLERK_GUIDE, SCHEMA
 
             name = argv[argv.index("--clerk") + 1]
             if name == "claude":
-                from rubbersand.clerks.claude import ClaudeClerk as Clerk
+                from rubberbandbox.clerks.claude import ClaudeClerk as Clerk
             elif name == "codex":
-                from rubbersand.clerks.codex import CodexClerk as Clerk
+                from rubberbandbox.clerks.codex import CodexClerk as Clerk
             else:
                 print(f"unknown clerk {name!r}: claude | codex")
                 return 2

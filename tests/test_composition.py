@@ -6,12 +6,12 @@ import pytest
 from hypothesis import HealthCheck, event, given, settings
 from hypothesis import strategies as st
 
-from rubbersand.core import Egress, InboundEvent, KindSpec, ManualClock, Mount, Proposal, Sandbox
-from rubbersand.packs.coding import CodingPack, SimTools
-from rubbersand.packs.coding import KeywordClerk as CodingClerk
-from rubbersand.packs.coding import KINDS as CODING_KINDS
-from rubbersand.packs.messaging import DEFAULT_PUBLISHED, KeywordClerk, MessagingPack, SimChannel
-from rubbersand.packs.messaging import KINDS as MSG_KINDS
+from rubberbandbox.core import Egress, InboundEvent, KindSpec, ManualClock, Mount, Proposal, Sandbox
+from rubberbandbox.packs.coding import CodingPack, SimTools
+from rubberbandbox.packs.coding import KeywordClerk as CodingClerk
+from rubberbandbox.packs.coding import KINDS as CODING_KINDS
+from rubberbandbox.packs.messaging import DEFAULT_PUBLISHED, KeywordClerk, MessagingPack, SimChannel
+from rubberbandbox.packs.messaging import KINDS as MSG_KINDS
 
 from test_properties import CANARY, HostileHands, public_renderings
 
@@ -63,7 +63,7 @@ def test_overlapping_channels_and_colliding_kinds_are_rejected():
 def test_a_pack_cannot_propose_another_packs_kinds():
     class Meddler(CodingPack):
         def decide(self, ctx):
-            from rubbersand.core import EXTERNAL_PRIVATE
+            from rubberbandbox.core import EXTERNAL_PRIVATE
 
             dest = ctx.destination("sms:+12065550100", EXTERNAL_PRIVATE)
             return [Proposal(Egress("msg.reply", dest, (ctx.published["script.generic"],)), lane=True)]

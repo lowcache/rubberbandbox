@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from rubbersand.core import InboundEvent
+from rubberbandbox.core import InboundEvent
 
 from . import build
 from .clerk import KeywordClerk

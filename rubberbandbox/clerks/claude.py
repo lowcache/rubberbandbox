@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from rubbersand.core import Schema
+from rubberbandbox.core import Schema
 
 from .jsonschema import SYSTEM, ClerkUncertain, json_schema
 

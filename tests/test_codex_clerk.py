@@ -5,10 +5,10 @@ import subprocess
 
 import pytest
 
-from rubbersand.clerks.codex import DISABLED_FEATURES, CodexClerk
-from rubbersand.clerks.jsonschema import ClerkUncertain, json_schema
-from rubbersand.core import InboundEvent
-from rubbersand.packs.messaging import CLERK_GUIDE, SCHEMA, build
+from rubberbandbox.clerks.codex import DISABLED_FEATURES, CodexClerk
+from rubberbandbox.clerks.jsonschema import ClerkUncertain, json_schema
+from rubberbandbox.core import InboundEvent
+from rubberbandbox.packs.messaging import CLERK_GUIDE, SCHEMA, build
 
 GOOD = {"need": "price", "requested_action": "reply", "mentions": []}
 

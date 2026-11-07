@@ -5,9 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from rubbersand.clerks.claude import ClaudeClerk, ClerkUncertain, json_schema
-from rubbersand.core import InboundEvent
-from rubbersand.packs.messaging import CLERK_GUIDE, SCHEMA, build
+from rubberbandbox.clerks.claude import ClaudeClerk, ClerkUncertain, json_schema
+from rubberbandbox.core import InboundEvent
+from rubberbandbox.packs.messaging import CLERK_GUIDE, SCHEMA, build
 
 
 class FakeClient:

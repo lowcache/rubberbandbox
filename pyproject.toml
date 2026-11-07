@@ -1,5 +1,5 @@
 [project]
-name = "rubbersand"
+name = "rubberbandbox"
 version = "0.1.0"
 description = "Rubber Sandbox: elastic, provenance-tracked sandboxing for LLM agents (reference implementation)"
 requires-python = ">=3.11"

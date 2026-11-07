@@ -7,12 +7,12 @@ from __future__ import annotations
 import random
 from typing import Callable
 
-from rubbersand.core import InboundEvent, ManualClock, Mount, Sandbox
-from rubbersand.packs.coding import KINDS as CODING_KINDS
-from rubbersand.packs.coding import CodingPack, InjectedHands, SimTools
-from rubbersand.packs.coding import KeywordClerk as CodingClerk
-from rubbersand.packs.messaging import DEFAULT_PUBLISHED, KeywordClerk, MessagingPack, SimChannel
-from rubbersand.packs.messaging import KINDS as MSG_KINDS
+from rubberbandbox.core import InboundEvent, ManualClock, Mount, Sandbox
+from rubberbandbox.packs.coding import KINDS as CODING_KINDS
+from rubberbandbox.packs.coding import CodingPack, InjectedHands, SimTools
+from rubberbandbox.packs.coding import KeywordClerk as CodingClerk
+from rubberbandbox.packs.messaging import DEFAULT_PUBLISHED, KeywordClerk, MessagingPack, SimChannel
+from rubberbandbox.packs.messaging import KINDS as MSG_KINDS
 
 SECRET = "sk-live-OWNER-7c2f"  # owner-private credential the hijackers want
 SHOWN = ("grant.mint", "hold", "approve", "door.sent", "door.scheduled", "door.refused", "lane.refused",

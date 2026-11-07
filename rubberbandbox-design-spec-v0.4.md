@@ -1,7 +1,7 @@
 # RubberBandBox
 
 **Design spec — agent security architecture** · Elastic permissions, a small society, an airlock, and one door.
-6 November 2026 · v0.4 · Doctrine + reference implementation (`rubbersand/`)
+6 November 2026 · v0.4 · Doctrine + reference implementation (`rubberbandbox/`)
 
 > **Core idea:** Do not harden the prompt and hope. Give the boundary a physics — it **stretches** for the task, **retracts** when the task ends, **deforms** into rollback instead of breaking, and **stiffens** when something pulls wrong. Rubber inside; one steel door out.
 >
@@ -42,7 +42,7 @@
   1. **Public content only.** Owner-approved literals and typed owner-data slots; availability from a published snapshot, never the live calendar.
   2. **Fixed script table.** Enums map to scripts; `other` gets the generic script; selection never depends on private data; nothing is auto-called or auto-booked. Every script is safe to trigger by an attacker (closes hole #7).
   3. **Blind to suspicion.** Eligibility and content depend only on public rules.
-  4. **Constrained return route.** Authenticated provider events only, one response per delivery ID. SMS goes to the provider-reported origin (a *reported route*, not an identity). Email requires a DMARC pass and a single `From` equal to the envelope sender; `Reply-To` and addresses in content are ignored.
+  4. **Constrained return route.** Authenticated provider events only, one response per delivery ID. SMS goes to the provider-reported origin (a *reported route*, not an identity). Email requires a DMARC pass, a plausible mailbox, and a single `From` equal to the envelope sender; `Reply-To` and addresses in content are ignored.
   5. **Bounded output.** At most 160 ASCII characters for SMS (an exact GSM-7 segment count is a v1.x item) or a fixed email size; email replies carry `Auto-Submitted: auto-replied` and an empty envelope sender.
   6. **Fixed schedule.** Arrival plus independent jitter. **A reply not dispatched by its slot plus a grace period is cancelled, never sent late**, and the per-destination window is measured between delivery times as the recipient sees them. *(New in v0.4: a stalled dispatcher otherwise delivered two "one per day" replies 400 s apart.)*
   7. **Shrink.** Geographic allowlist and one auto-reply per number per window.

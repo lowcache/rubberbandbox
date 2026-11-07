@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 from typing import Callable
 
-from rubbersand.core import Schema
+from rubberbandbox.core import Schema
 
 from .jsonschema import SYSTEM, ClerkUncertain, json_schema
 
@@ -48,7 +48,7 @@ class CodexClerk:
 
     def extract(self, text: str) -> object:
         prompt = f"{self.instructions}\n\n<message>\n{text}\n</message>"
-        with tempfile.TemporaryDirectory(prefix="rubbersand-clerk-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="rubberbandbox-clerk-") as tmp:
             schema_path = Path(tmp, "schema.json")
             schema_path.write_text(json.dumps(self.schema))
             workdir = Path(tmp, "empty")

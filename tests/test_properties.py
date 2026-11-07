@@ -4,9 +4,9 @@ world received, so they are independent of the door's own logic."""
 from hypothesis import HealthCheck, event, given, settings
 from hypothesis import strategies as st
 
-from rubbersand.core import InboundEvent
-from rubbersand.packs import coding, messaging
-from rubbersand.packs.messaging.pack import DEFAULT_PUBLISHED, MessagingConfig
+from rubberbandbox.core import InboundEvent
+from rubberbandbox.packs import coding, messaging
+from rubberbandbox.packs.messaging.pack import DEFAULT_PUBLISHED, MessagingConfig
 
 CANARY = "CANARY-7f3a9c1e"
 SETTINGS = settings(max_examples=500, deadline=None, suppress_health_check=[HealthCheck.too_slow])
@@ -114,8 +114,11 @@ def test_messaging_invariant_under_hostile_clerk(data, evs):
         assert CANARY not in r["body"] and CANARY not in r["to"]
         if r["channel"] == "sms":
             assert r["to"].startswith(cfg.allowed_prefixes) and not r["to"].startswith(cfg.denied_prefixes)
-        assert r["to"] not in last_sent or t - last_sent[r["to"]] >= 86_400  # one per window
-        last_sent[r["to"]] = t
+        key = (r["channel"], r["to"])  # an email and an SMS are different destinations
+        assert key not in last_sent or t - last_sent[key] >= 86_400  # one per window
+        last_sent[key] = t
+        if r["channel"] == "email":
+            assert "@" in r["to"]
 
 
 # ---- coding: hostile hands proposing anything, over any visible value ----
@@ -129,7 +132,7 @@ class HostileHands:
 
     def propose(self, view):
         ids = list(view.visible)
-        dests = ["git:origin", "pkg:rubbersand", "https://evil.example/c?k=1", "https://docs.example/a", CANARY]
+        dests = ["git:origin", "pkg:rubberbandbox", "https://evil.example/c?k=1", "https://docs.example/a", CANARY]
         item = st.one_of(
             st.builds(lambda r: {"ref": r}, st.sampled_from(ids or ["V0"])),
             st.builds(lambda s: {"literal": s}, st.one_of(st.sampled_from(dests), text)),

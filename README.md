@@ -9,8 +9,6 @@ RubberBandBox is a doctrine (`rubberbandbox-design-spec-v0.4.md`) and a working 
 implementation. Its claim is narrow and testable: **the model can be fooled, but a fooled model
 cannot widen what leaves the box.**
 
-> Python import path: `rubbersand` (the project's working name). The official name is RubberBandBox.
-
 ## Where it stands
 
 **Proof of concept: complete.** The v1 reference implementation runs, and its central claim is
@@ -60,12 +58,12 @@ zero regardless.
 ## Quickstart
 
 ```sh
-nix develop -c python -m rubbersand.cli demo                    # narrated walk-through (offline, deterministic)
-nix develop -c python -m rubbersand.cli demo --clerk codex      # same, with the live Codex clerk
+nix develop -c python -m rubberbandbox.cli demo                    # narrated walk-through (offline, deterministic)
+nix develop -c python -m rubberbandbox.cli demo --clerk codex      # same, with the live Codex clerk
 nix develop -c python -m pytest -q                              # full suite, property tests included
-nix develop -c python -m rubbersand.cli adversarial [--clerk codex|claude]   # fooled vs harm
-nix develop -c python -m rubbersand.cli clean       [--clerk codex|claude]   # accuracy and interruptions
-nix develop -c python -m rubbersand.cli attacks                 # routing attack corpus
+nix develop -c python -m rubberbandbox.cli adversarial [--clerk codex|claude]   # fooled vs harm
+nix develop -c python -m rubberbandbox.cli clean       [--clerk codex|claude]   # accuracy and interruptions
+nix develop -c python -m rubberbandbox.cli attacks                 # routing attack corpus
 nix develop -c python scripts/mutation_check.py                 # break each guard; the suite must catch it
 ```
 
@@ -122,11 +120,11 @@ A sandbox mounts several packs, each with its own clerk, behind one door:
 - Only the door holds tool adapters.
 
 ```
-rubbersand/core/      labels · store · casefile (airlock) · grants · invariant · public_lane
+rubberbandbox/core/      labels · store · casefile (airlock) · grants · invariant · public_lane
                       approvals (digest) · door · sandbox (wiring, routing, composition) · types
-rubbersand/packs/     messaging/ · coding/   (each imports only `rubbersand.core`)
-rubbersand/clerks/    claude.py · codex.py · jsonschema.py (shared schema generation)
-rubbersand/demo.py    the narrated walk-through
+rubberbandbox/packs/     messaging/ · coding/   (each imports only `rubberbandbox.core`)
+rubberbandbox/clerks/    claude.py · codex.py · jsonschema.py (shared schema generation)
+rubberbandbox/demo.py    the narrated walk-through
 corpus/               attacks (32) · clean (40) · adversarial (60)
 tests/                unit, corpus, structural guards, property, composition, clerk, demo
 ```

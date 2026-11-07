@@ -2,7 +2,7 @@ import random
 
 import pytest
 
-from rubbersand.core import (
+from rubberbandbox.core import (
     EXTERNAL_PRIVATE,
     EXTERNAL_PUBLIC,
     OWNER_PRIVATE,
@@ -20,8 +20,8 @@ from rubbersand.core import (
     Schema,
     ScopeError,
 )
-from rubbersand.core.casefile import validate
-from rubbersand.core.store import Store
+from rubberbandbox.core.casefile import validate
+from rubberbandbox.core.store import Store
 
 KINDS = {
     "send": KindSpec("send"),
@@ -208,8 +208,8 @@ def test_door_refuses_private_payload_even_with_a_valid_lane_receipt(env):
 
 def test_expiry_is_rechecked_per_dispatch_not_per_batch():
     """A slow adapter must not let later scheduled crossings use a stale 'now'."""
-    from rubbersand.core.door import Door
-    from rubbersand.core.grants import GrantBook
+    from rubberbandbox.core.door import Door
+    from rubberbandbox.core.grants import GrantBook
 
     clock, store, calls = ManualClock(0), Store(), []
 
@@ -251,7 +251,7 @@ def test_noncanonical_ids_resolve_to_nothing_and_never_raise(ref):
 
 
 def test_invariant_itself_refuses_a_lane_receipt_before_its_slot(env):
-    from rubbersand.core import invariant
+    from rubberbandbox.core import invariant
 
     sb, _, clock = env
     eg = Egress("reply", put(sb, "dest:x", EXTERNAL_PRIVATE), (put(sb, "hours", OWNER_PUBLIC),))

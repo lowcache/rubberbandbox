@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 
-from rubbersand.core import LaneConfig, ManualClock, Mount, Sandbox
+from rubberbandbox.core import LaneConfig, ManualClock, Mount, Sandbox
 
 from .clerk import KeywordClerk
 from .pack import CLERK_GUIDE, DEFAULT_PUBLISHED, KINDS, SCHEMA, MessagingConfig, MessagingPack

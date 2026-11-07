@@ -4,9 +4,9 @@ and only the door holds tool adapters."""
 import ast
 from pathlib import Path
 
-from rubbersand.packs.messaging import build
+from rubberbandbox.packs.messaging import build
 
-PKG = Path(__file__).resolve().parent.parent / "rubbersand"
+PKG = Path(__file__).resolve().parent.parent / "rubberbandbox"
 
 
 def imports(path):
@@ -32,9 +32,9 @@ def test_packs_and_clerks_use_only_the_core_public_api():
             if level:  # relative import within the same pack
                 assert level == 1, f"{path} reaches outside its pack"
                 continue
-            if mod.startswith("rubbersand"):
-                assert mod == "rubbersand.core", f"{path} imports {mod}"
-            if mod.startswith("rubbersand.packs"):
+            if mod.startswith("rubberbandbox"):
+                assert mod == "rubberbandbox.core", f"{path} imports {mod}"
+            if mod.startswith("rubberbandbox.packs"):
                 raise AssertionError(f"{path} imports another pack")
 
 

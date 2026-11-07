@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Sequence
 from urllib.parse import urlsplit
 
-from rubbersand.core import (
+from rubberbandbox.core import (
     EXTERNAL_PRIVATE,
     EXTERNAL_PUBLIC,
     DecideContext,

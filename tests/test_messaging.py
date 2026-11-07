@@ -2,9 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from rubbersand.core import InboundEvent, LaneConfig
-from rubbersand.packs.messaging import SimChannel, build
-from rubbersand.packs.messaging.corpus import run_attacks, run_clean
+from rubberbandbox.core import InboundEvent, LaneConfig
+from rubberbandbox.packs.messaging import SimChannel, build
+from rubberbandbox.packs.messaging.corpus import run_attacks, run_clean
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -69,7 +69,7 @@ def test_service_budget_and_provider_hard_cap():
 
 
 def test_unknown_route_cost_is_denied():
-    from rubbersand.packs.messaging import MessagingConfig
+    from rubberbandbox.packs.messaging import MessagingConfig
 
     sb, ch, clock = build(config=MessagingConfig(sms_cost={}))
     sb.receive(sms("+12065550100", "d1", "price?", clock()))
@@ -104,7 +104,7 @@ def test_booking_and_complaint_reach_the_digest_never_an_action():
 
 def test_digest_interruption_budget_collapses_per_cluster():
     sb, _, clock = build()
-    from rubbersand.core import EXTERNAL_PRIVATE, OWNER_PRIVATE, Egress
+    from rubberbandbox.core import EXTERNAL_PRIVATE, OWNER_PRIVATE, Egress
 
     for i in range(5):
         dest = sb.store.put(f"sms:+1206555{i:04d}", EXTERNAL_PRIVATE, "test", clock())
@@ -137,7 +137,7 @@ ADV_SAMPLE = [
 
 
 def test_adversarial_scorer_reports_fooled_and_zero_harm(tmp_path):
-    from rubbersand.packs.messaging.corpus import run_adversarial
+    from rubberbandbox.packs.messaging.corpus import run_adversarial
 
     path = tmp_path / "adv.json"
     path.write_text(__import__("json").dumps(ADV_SAMPLE))
@@ -147,8 +147,8 @@ def test_adversarial_scorer_reports_fooled_and_zero_harm(tmp_path):
 
 def test_adversarial_scorer_detects_harm_when_the_door_is_broken(tmp_path, monkeypatch):
     """A scorer that cannot see harm would make 'harm 0' meaningless."""
-    from rubbersand.packs.messaging import sim
-    from rubbersand.packs.messaging.corpus import SECRET, run_adversarial
+    from rubberbandbox.packs.messaging import sim
+    from rubberbandbox.packs.messaging.corpus import SECRET, run_adversarial
 
     real = sim.SimChannel.execute
 
@@ -163,3 +163,14 @@ def test_adversarial_scorer_detects_harm_when_the_door_is_broken(tmp_path, monke
     rep = run_adversarial(str(path))
     kinds = " ".join(w for _, w in rep.harm)
     assert "messages for one inbound" in kinds and "leaked" in kinds and "not the sender" in kinds
+
+
+def test_email_route_requires_a_plausible_mailbox():
+    sb, ch, clock = build()
+    for i, sender in enumerate(["+12065550100", "no-at-sign", "a@b", "x@@y.example"]):
+        meta = {"dmarc": "pass", "from": [sender], "envelope_from": sender, "reply_to": None,
+                "auto_submitted": "no", "list_id": None}
+        sb.receive(InboundEvent("email", True, sender, f"m{i}", "price?", clock(), meta))
+    clock.advance(600)
+    sb.tick()
+    assert ch.sent == []

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from rubbersand.core import HandsView
+from rubberbandbox.core import HandsView
 
 
 class ScriptedHands:
@@ -37,7 +37,7 @@ class InjectedHands:
                 })
                 proposals.append({
                     "kind": "pkg.publish",
-                    "destination": {"literal": "pkg:rubbersand"},
+                    "destination": {"literal": "pkg:rubberbandbox"},
                     "payload": [{"ref": vid}],
                 })
         return proposals

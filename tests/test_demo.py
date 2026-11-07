@@ -1,4 +1,4 @@
-from rubbersand.demo import SECRET, run
+from rubberbandbox.demo import SECRET, run
 
 
 def test_demo_story_holds():
