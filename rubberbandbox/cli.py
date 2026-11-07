@@ -1,10 +1,27 @@
-"""python -m rubberbandbox.cli attacks [path] | clean [path] [--clerk claude|codex] | adversarial [path] [--clerk claude|codex] | demo [--clerk claude|codex]"""
+"""python -m rubberbandbox.cli attacks [path] | clean [path] [--clerk claude|codex] | adversarial [path] [--clerk claude|codex] | demo [--clerk claude|codex] [--pace SECONDS]"""
 
 from __future__ import annotations
 
 import sys
 
 from rubberbandbox.packs.messaging.corpus import run_adversarial, run_attacks, run_clean
+
+
+def _colorize(line: str) -> str:
+    """Highlight the story beats when writing to a terminal (the demo GIF is recorded from one)."""
+    import re
+
+    bold, dim, red, green, yellow, cyan, reset = (f"\033[{c}m" for c in ("1", "2", "1;31", "32", "33", "1;36", "0"))
+    if line.lstrip("\n").startswith("=="):
+        return f"{cyan}{line}{reset}"
+    if line.lstrip().startswith("audit"):
+        return f"{dim}{line}{reset}"
+    if line.lstrip().startswith("OUT"):
+        return f"{green}{line}{reset}"
+    line = re.sub(r"\(FOOLED[^)]*\)", lambda m: f"{red}{m.group(0)}{reset}", line)
+    line = re.sub(r"\b(held|refused)\b", lambda m: f"{yellow}{bold}{m.group(0)}{reset}", line)
+    line = line.replace("credential leaked: no", f"{green}{bold}credential leaked: no{reset}")
+    return line.replace("(correct)", f"{green}(correct){reset}")
 
 
 def main(argv: list[str]) -> int:
@@ -30,7 +47,9 @@ def main(argv: list[str]) -> int:
             else:
                 from rubberbandbox.clerks.claude import ClaudeClerk as Clerk
             clerk = Clerk(SCHEMA, CLERK_GUIDE)
-        return 1 if run(clerk)["leaked"] else 0
+        pace = float(argv[argv.index("--pace") + 1]) if "--pace" in argv else 0.0
+        out = (lambda line: print(_colorize(line))) if sys.stdout.isatty() else print
+        return 1 if run(clerk, out=out, pace=pace)["leaked"] else 0
     if cmd in ("clean", "adversarial"):
         args = [a for a in argv[1:] if not a.startswith("--")]
         clerk = None

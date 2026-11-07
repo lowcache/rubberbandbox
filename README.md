@@ -9,6 +9,10 @@ RubberBandBox is a doctrine (`rubberbandbox-design-spec-v0.4.md`) and a working 
 implementation. Its claim is narrow and testable: **the model can be fooled, but a fooled model
 cannot widen what leaves the box.**
 
+![RubberBandBox demo: an injected SMS fools the clerk and a hijacked coding agent is contained, yet only owner-published scripts and public reads leave the box](docs/demo.gif)
+
+*The demo above (`python -m rubberbandbox.cli demo`) is re-rendered with `nix shell nixpkgs#vhs -c vhs docs/demo.tape`.*
+
 ## Where it stands
 
 **Proof of concept: complete.** The v1 reference implementation runs, and its central claim is

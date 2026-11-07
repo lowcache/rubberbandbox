@@ -5,6 +5,7 @@ the outside world actually received."""
 from __future__ import annotations
 
 import random
+import time
 from typing import Callable
 
 from rubberbandbox.core import InboundEvent, ManualClock, Mount, Sandbox
@@ -39,7 +40,15 @@ class _CodingOnlyHands:
         return self.inner.propose(view) if view.schema == "coding.issue" else []
 
 
-def run(clerk=None, out: Callable[[str], None] = print) -> dict:
+def run(clerk=None, out: Callable[[str], None] = print, pace: float = 0.0) -> dict:
+    """pace: seconds to pause after each line (4x after an act heading), for recordings."""
+    if pace > 0:
+        emit = out
+
+        def out(line: str) -> None:
+            emit(line)
+            time.sleep(pace * (4 if line.startswith("\n==") else 1))
+
     clock, channel, tools = ManualClock(), SimChannel(), SimTools()
     msg_clerk = _Recording(clerk or KeywordClerk())
     sb = Sandbox(
