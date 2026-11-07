@@ -1,5 +1,5 @@
 <div align="center">
-<img src="docs/banner.png" alt="RubberBand Box elastic sandbox">
+<img src="docs/banner.jpeg" alt="RubberBand Box elastic sandbox">
 </div>
 
 # RubberBandBox
