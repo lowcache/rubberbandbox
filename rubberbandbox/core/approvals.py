@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from collections import Counter
 from dataclasses import dataclass
 
-from .store import Store, parse_id
+from .store import Store, egress_blob, egress_from_blob, parse_id
 from .types import Authorization, Egress
 
 
@@ -46,7 +45,7 @@ class Approvals:
         ).fetchone()
         if row:
             return f"A{row[0]}"
-        blob = json.dumps({"kind": egress.kind, "dest": egress.destination.id, "payload": [v.id for v in egress.payload]})
+        blob = egress_blob(egress)
         cur = self.store.db.execute(
             "INSERT INTO approvals (egress, digest, cluster, reason, status, created_at) VALUES (?,?,?,?, 'pending', ?)",
             (blob, egress.digest, cluster, reason, now),
@@ -64,12 +63,7 @@ class Approvals:
         row = self.store.db.execute("SELECT egress FROM approvals WHERE id=?", (parse_id(aid, "A"),)).fetchone()
         if row is None:
             return None
-        blob = json.loads(row[0])
-        dest = self.store.get(blob["dest"])
-        payload = tuple(self.store.get(v) for v in blob["payload"])
-        if dest is None or any(v is None for v in payload):
-            return None
-        return Egress(blob["kind"], dest, payload)  # type: ignore[arg-type]
+        return egress_from_blob(self.store, row[0])
 
     def approve(self, aid: str, now: float) -> Authorization:
         egress = self.egress_of(aid)

@@ -8,7 +8,7 @@ from typing import Callable, Mapping
 
 from . import invariant
 from .grants import GrantBook
-from .store import Store, parse_id
+from .store import Store, egress_blob, egress_from_blob, parse_id
 from .types import Authorization, Egress, KindSpec, ToolAdapter
 
 _CONSUME = {"approval": ("approvals", "A"), "lane": ("receipts", "R")}  # single-use authorizations
@@ -47,7 +47,7 @@ class Door:
             self._store.audit(now, "door.refused", kind=egress.kind, dest=egress.destination.id, auth=auth.kind, reason=reason)
             return "refused", reason
         if send_at is not None and send_at > now:
-            blob = json.dumps({"kind": egress.kind, "dest": egress.destination.id, "payload": [v.id for v in egress.payload]})
+            blob = egress_blob(egress)
             self._store.db.execute(
                 "INSERT INTO scheduled (egress, auth, send_at) VALUES (?,?,?)",
                 (blob, json.dumps([auth.kind, auth.ref]), send_at),
@@ -65,13 +65,10 @@ class Door:
         results = []
         for sid, blob, auth_blob in rows:
             self._store.db.execute("UPDATE scheduled SET status='done' WHERE id=?", (sid,))
-            e = json.loads(blob)
-            dest = self._store.get(e["dest"])
-            payload = tuple(self._store.get(v) for v in e["payload"])
-            if dest is None or any(v is None for v in payload):
+            egress = egress_from_blob(self._store, blob)
+            if egress is None:
                 results.append(("refused", "scheduled egress references missing values"))
                 continue
-            egress = Egress(e["kind"], dest, payload)  # type: ignore[arg-type]
             results.append(self._execute(egress, Authorization(*json.loads(auth_blob))))
         return results
 
@@ -86,7 +83,8 @@ class Door:
             self._store.audit(now, "door.refused", kind=egress.kind, dest=egress.destination.id, auth=auth.kind, reason=reason)
             return "refused", reason
         try:
-            self._adapters[egress.kind].execute(egress.kind, egress.destination.data, [v.data for v in egress.payload])
+            extra = {"control": [v.data for v in egress.control]} if egress.control else {}
+            self._adapters[egress.kind].execute(egress.kind, egress.destination.data, [v.data for v in egress.payload], **extra)
         except Exception as exc:  # the outside world refused (e.g. provider hard cap)
             self._store.audit(now, "door.failed", kind=egress.kind, dest=egress.destination.id, error=repr(exc))
             return "failed", repr(exc)

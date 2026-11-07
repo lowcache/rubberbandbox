@@ -17,6 +17,13 @@ MUTANTS = {
   "lane slot lower bound off": ("rubberbandbox/core/invariant.py", "        if now < row[2]:\n            return \"before its slot\"", "        pass"),
   "unauthenticated may be public": ("rubberbandbox/core/sandbox.py", "        if not event.authenticated:  # unauthenticated", "        if False:  #"),
   "door trusts caller send_at": ("rubberbandbox/core/door.py", "            send_at = row[0] if row else None", "            pass"),
+  "spend/delete grantable": ("rubberbandbox/core/manifest.py", "grantable=m.reviewed and m.effect not in _APPROVAL_ONLY and destinations <= 1,", "grantable=True,"),
+  "door ignores grantable": ("rubberbandbox/core/invariant.py", '        if not spec.grantable:\n            return "kind needs owner approval per egress"', '        pass'),
+  "grant ignores control taint": ("rubberbandbox/core/invariant.py", '        if not spec.read_only and not all(v.label.trusted for v in egress.control):\n            return "untrusted control args need owner approval"', '        pass'),
+  "public_read ignores control": ("rubberbandbox/core/invariant.py", '        if not all(v.label.public for v in egress.control):\n            return "read is steered by private-derived data"', '        pass'),
+  "door lane ignores control": ("rubberbandbox/core/invariant.py", '        if egress.control:\n            return "public lane carries no control args"', '        pass'),
+  "typed refs unchecked": ("rubberbandbox/core/casefile.py", "if shape is not None and not shape.fullmatch(span):", "if False:"),
+  "bones ignore control taint": ("rubberbandbox/core/sandbox.py", 'if not spec.read_only and not all(v.label.trusted for v in eg.control):\n        return "untrusted control args"', 'if False:\n        pass'),
 }
 caught = 0
 for name, (path, old, new) in MUTANTS.items():

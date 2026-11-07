@@ -2,9 +2,11 @@
 
 No egress unless one of:
   approval     the owner tapped yes on exactly this egress (single use)
-  grant        an active owner-minted grant covers (kind, destination); publishes need trusted payload
-  lane         an unexpired public-lane receipt for exactly this egress; payload is owner-published
-  public_read  a read-only kind whose destination and payload are all public
+  grant        an active owner-minted grant covers (kind, destination) of a grantable kind;
+               publishes need trusted payload; non-reads need trusted control args
+  lane         an unexpired public-lane receipt for exactly this egress; payload is owner-published,
+               no control args
+  public_read  a read-only kind whose destination, payload and control args are all public
 """
 
 from __future__ import annotations
@@ -49,6 +51,10 @@ def check(
             return "grant does not cover this kind and destination"
         if spec.publishes and not all(v.label.trusted for v in egress.payload):
             return "publish with untrusted payload needs owner approval"
+        if not spec.grantable:
+            return "kind needs owner approval per egress"
+        if not spec.read_only and not all(v.label.trusted for v in egress.control):
+            return "untrusted control args need owner approval"
         return None
 
     if auth.kind == "lane":
@@ -56,6 +62,8 @@ def check(
             return "kind is not eligible for the public lane"
         if not egress.payload or any(v.label != OWNER_PUBLIC for v in egress.payload):
             return "public lane carries owner-published data only"
+        if egress.control:
+            return "public lane carries no control args"
         row = _row(store, "SELECT digest, consumed, send_at, expires_at FROM receipts WHERE id=?", auth.ref, "R")
         if row is None:
             return "no such lane receipt"
@@ -74,6 +82,8 @@ def check(
             return "kind is not read-only"
         if not egress.destination.label.public or not all(v.label.public for v in egress.payload):
             return "read carries or targets private-derived data"
+        if not all(v.label.public for v in egress.control):
+            return "read is steered by private-derived data"
         return None
 
     return f"unknown authorization {auth.kind!r}"

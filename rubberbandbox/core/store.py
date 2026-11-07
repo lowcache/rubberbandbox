@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from typing import Iterator
 
 from .labels import Confidentiality, Integrity, Label, Value
+from .types import Egress
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS vals (
@@ -51,6 +52,24 @@ def parse_id(ref: object, prefix: str) -> int | None:
         return None
     m = _ID.fullmatch(ref)
     return int(m.group(2)) if m and m.group(1) == prefix else None
+
+
+def egress_blob(egress: Egress) -> str:
+    e = {"kind": egress.kind, "dest": egress.destination.id, "payload": [v.id for v in egress.payload]}
+    if egress.control:
+        e["control"] = [v.id for v in egress.control]
+    return json.dumps(e)
+
+
+def egress_from_blob(store: "Store", blob: str) -> Egress | None:
+    """None if any referenced value is missing."""
+    e = json.loads(blob)
+    dest = store.get(e["dest"])
+    payload = tuple(store.get(v) for v in e["payload"])
+    control = tuple(store.get(v) for v in e.get("control", []))
+    if dest is None or any(v is None for v in (*payload, *control)):
+        return None
+    return Egress(e["kind"], dest, payload, control)  # type: ignore[arg-type]
 
 
 class Store:

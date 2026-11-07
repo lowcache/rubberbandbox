@@ -1,7 +1,7 @@
 """Public API of the Rubber Sandbox core. Packs import from here and nowhere else."""
 
 from .approvals import Digest, DigestConfig, DigestEntry
-from .casefile import AirlockViolation, CaseFile, EnumField, IntField, RefList, Schema
+from .casefile import AirlockViolation, CaseFile, EnumField, IntField, RefList, Schema, TypedRefs
 from .grants import Grant, ScopeError
 from .labels import (
     EXTERNAL_PRIVATE,
@@ -13,6 +13,7 @@ from .labels import (
     Label,
     Value,
 )
+from .manifest import EFFECTS, ROLES, ToolManifest, compile_kind, compile_kinds, conservative, generated_schema
 from .public_lane import LaneConfig
 from .sandbox import ManualClock, Mount, Outcome, Sandbox
 from .types import (
@@ -30,6 +31,7 @@ from .types import (
     RouteReceipt,
     ToolAdapter,
 )
+from .workflow import ChannelAdapter, ManifestPack, Reply, Rules, prefix_cluster
 
 from types import ModuleType as _M
 

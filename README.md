@@ -1,3 +1,7 @@
+<div align="center">
+<img src="docs/banner.png" alt="RubberBand Box elastic sandbox">
+</div>
+
 # RubberBandBox
 
 **Elastic, provenance-tracked sandboxing for LLM agents.** Don't harden the prompt and hope. Give

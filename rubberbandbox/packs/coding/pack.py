@@ -1,22 +1,21 @@
-"""Coding workflow: issue-driven work without a public lane."""
+"""Coding workflow: issue-driven work without a public lane. Declarations only."""
 
 from __future__ import annotations
-
-from typing import Sequence
-from urllib.parse import urlsplit
 
 from rubberbandbox.core import (
     EXTERNAL_PRIVATE,
     EXTERNAL_PUBLIC,
-    DecideContext,
     EnumField,
     InboundEvent,
-    KindSpec,
     Label,
-    Notice,
+    ManifestPack,
     RefList,
     RouteReceipt,
+    Rules,
     Schema,
+    ToolManifest,
+    compile_kinds,
+    prefix_cluster,
 )
 
 SCHEMA = Schema(
@@ -28,19 +27,19 @@ SCHEMA = Schema(
     },
 )
 
-KINDS = {
-    "http.fetch": KindSpec("http.fetch", read_only=True),
-    "http.post": KindSpec("http.post"),
-    "git.push": KindSpec("git.push", publishes=True),
-    "pkg.publish": KindSpec("pkg.publish", publishes=True),
-}
+TOOLS = (
+    ToolManifest("http.fetch", "read-public", {"url": "destination"}),
+    ToolManifest("http.post", "send", {"url": "destination", "body": "payload"}),
+    ToolManifest("git.push", "publish", {"remote": "destination", "patch": "payload"}),
+    ToolManifest("pkg.publish", "publish", {"package": "destination", "artifact": "payload"}),
+)
+KINDS = compile_kinds(TOOLS)
+
+RULES = Rules(notices={"task": {"release": "release_requested"}}, authenticated_only=False)
 
 
-class CodingPack:
-    name = "coding"
-    channels = frozenset({"tracker"})
-    schema = SCHEMA
-    kinds = KINDS
+class TrackerChannel:
+    name = "tracker"
 
     def inbound_label(self, event: InboundEvent) -> Label:
         public = event.authenticated and event.meta.get("visibility") == "public"
@@ -49,20 +48,10 @@ class CodingPack:
     def route(self, event: InboundEvent) -> RouteReceipt | None:
         return None
 
-    def decide(self, ctx: DecideContext) -> Sequence[Notice]:
-        if ctx.casefile["task"] == "release":
-            return [Notice("release_requested", ctx.casefile.origin)]
-        return []
+    def fits(self, destination: str, text: str) -> bool:
+        return False
 
-    def cluster(self, destination: str) -> str:
-        if destination.startswith("git:"):
-            return "git"
-        if destination.startswith("pkg:"):
-            return "pkg"
-        try:
-            url = urlsplit(destination)
-            if url.scheme in ("http", "https") and url.hostname:
-                return url.hostname
-        except ValueError:
-            pass
-        return "unknown"
+
+class CodingPack(ManifestPack):
+    def __init__(self) -> None:
+        super().__init__("coding", SCHEMA, TOOLS, (TrackerChannel(),), RULES, prefix_cluster("git", "pkg"))

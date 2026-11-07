@@ -7,7 +7,7 @@ import random
 from rubberbandbox.core import LaneConfig, ManualClock, Mount, Sandbox
 
 from .clerk import KeywordClerk
-from .pack import CLERK_GUIDE, DEFAULT_PUBLISHED, KINDS, SCHEMA, MessagingConfig, MessagingPack
+from .pack import CLERK_GUIDE, DEFAULT_PUBLISHED, KINDS, RULES, SCHEMA, TOOLS, MessagingConfig, MessagingPack
 from .sim import ProviderRefused, SimChannel
 
 
@@ -36,4 +36,4 @@ def build(
 
 
 __all__ = ["build", "MessagingPack", "MessagingConfig", "KeywordClerk", "SimChannel", "ProviderRefused",
-           "KINDS", "SCHEMA", "DEFAULT_PUBLISHED", "CLERK_GUIDE"]
+           "KINDS", "TOOLS", "RULES", "SCHEMA", "DEFAULT_PUBLISHED", "CLERK_GUIDE"]

@@ -40,6 +40,8 @@ class PublicLane:
             return None, 0.0, "kind not eligible"
         if not egress.payload or any(v.label != OWNER_PUBLIC for v in egress.payload):
             return None, 0.0, "payload not owner-published"
+        if egress.control:
+            return None, 0.0, "control args not allowed"
         if route.destination != egress.destination.data:
             return None, 0.0, "destination is not the route's return address"
         cfg = self.config

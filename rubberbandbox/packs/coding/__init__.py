@@ -8,7 +8,7 @@ from rubberbandbox.core import Hands, ManualClock, Mount, Sandbox
 
 from .clerk import KeywordClerk
 from .hands import InjectedHands, ScriptedHands
-from .pack import KINDS, SCHEMA, CodingPack
+from .pack import KINDS, RULES, SCHEMA, TOOLS, CodingPack
 from .sim import SimTools
 
 
@@ -33,4 +33,4 @@ def build(
 
 
 __all__ = ["build", "CodingPack", "KeywordClerk", "InjectedHands", "ScriptedHands", "SimTools",
-           "KINDS", "SCHEMA"]
+           "KINDS", "TOOLS", "RULES", "SCHEMA"]

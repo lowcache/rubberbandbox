@@ -1,24 +1,25 @@
-"""Messaging pack: inbound SMS/email for a small service business, replies through the public lane."""
+"""Messaging pack: inbound SMS/email for a small service business, replies through the public lane.
+Declarations only: tool manifests, one adapter per channel, a rule table, and owner scripts."""
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Mapping, Sequence
+from typing import Mapping
 
 from rubberbandbox.core import (
     EXTERNAL_PRIVATE,
-    DecideContext,
-    Egress,
     EnumField,
     InboundEvent,
-    KindSpec,
     Label,
-    Notice,
-    Proposal,
+    ManifestPack,
     RefList,
+    Reply,
     RouteReceipt,
+    Rules,
     Schema,
+    ToolManifest,
+    compile_kinds,
 )
 
 SCHEMA = Schema(
@@ -30,10 +31,11 @@ SCHEMA = Schema(
     },
 )
 
-KINDS = {
-    "msg.reply": KindSpec("msg.reply", public_lane=True),
-    "msg.send": KindSpec("msg.send"),
-}
+TOOLS = (
+    ToolManifest("msg.reply", "send", {"to": "destination", "body": "payload"}, lane=True),
+    ToolManifest("msg.send", "send", {"to": "destination", "body": "payload"}),
+)
+KINDS = compile_kinds(TOOLS)
 
 SCRIPT_FOR_NEED = {
     "price": "script.price",
@@ -64,7 +66,6 @@ visit; reply if they ask a question or expect an answer; otherwise none."""
 
 _E164 = re.compile(r"\+\d{8,15}")
 _MAILBOX = re.compile(r"[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+")  # plausible addr-spec; not a full RFC 5322 parser
-_SLOT = re.compile(r"\{([a-z_]+)\}")
 
 
 @dataclass(frozen=True)
@@ -76,29 +77,26 @@ class MessagingConfig:
     email_max_bytes: int = 1000
 
 
-class MessagingPack:
-    name = "messaging"
-    channels = frozenset({"sms", "email"})
-    schema = SCHEMA
-    kinds = KINDS
+RULES = Rules(
+    notices={
+        "need": {"booking": "booking", "complaint": "complaint"},
+        "requested_action": {"call": "call", "visit": "visit"},  # never auto-call, never auto-book
+    },
+    reply=Reply("need", SCRIPT_FOR_NEED, "script.generic", "msg.reply"),
+)
 
-    def __init__(self, config: MessagingConfig | None = None) -> None:
-        self.config = config or MessagingConfig()
+
+class SmsChannel:
+    name = "sms"
+
+    def __init__(self, config: MessagingConfig) -> None:
+        self.config = config
 
     def inbound_label(self, event: InboundEvent) -> Label:
         return EXTERNAL_PRIVATE  # customer messages are untrusted and private to the owner
 
     def route(self, event: InboundEvent) -> RouteReceipt | None:
         """A constrained return route, or None. 'Reported route', never a verified identity."""
-        if not event.authenticated:
-            return None
-        if event.channel == "sms":
-            return self._sms_route(event)
-        if event.channel == "email":
-            return self._email_route(event)
-        return None
-
-    def _sms_route(self, event: InboundEvent) -> RouteReceipt | None:
         o, cfg = event.origin, self.config
         if not isinstance(o, str) or not _E164.fullmatch(o):
             return None
@@ -108,7 +106,20 @@ class MessagingPack:
         cost = cfg.sms_cost[max(prefixes, key=len)] if prefixes else None
         return RouteReceipt(f"sms:{o}", event.delivery_id, cost, event.received_at)
 
-    def _email_route(self, event: InboundEvent) -> RouteReceipt | None:
+    def fits(self, destination: str, text: str) -> bool:
+        return len(text) <= self.config.sms_max_chars and text.isascii()
+
+
+class EmailChannel:
+    name = "email"
+
+    def __init__(self, config: MessagingConfig) -> None:
+        self.config = config
+
+    def inbound_label(self, event: InboundEvent) -> Label:
+        return EXTERNAL_PRIVATE
+
+    def route(self, event: InboundEvent) -> RouteReceipt | None:
         m = event.meta
         froms, env = m.get("from"), m.get("envelope_from")
         if m.get("dmarc") != "pass":
@@ -124,39 +135,21 @@ class MessagingPack:
         # Reply-To and addresses in content are ignored by construction: only env is used.
         return RouteReceipt(f"email:{env.lower()}", event.delivery_id, 0.0, event.received_at)
 
-    def decide(self, ctx: DecideContext) -> Sequence[Proposal | Notice]:
-        cf = ctx.casefile
-        out: list[Proposal | Notice] = []
-        if not ctx.event.authenticated:
-            return out
-        need, action = cf["need"], cf["requested_action"]
-        if need in ("booking", "complaint"):
-            out.append(Notice(str(need), cf.origin))
-        if action in ("call", "visit"):
-            out.append(Notice(str(action), cf.origin))  # never auto-call, never auto-book
-        if ctx.route is None:
-            return out
-        template = ctx.published.get(SCRIPT_FOR_NEED[str(need)]) or ctx.published.get("script.generic")
-        if template is None:
-            return out
-        slots = {s: ctx.published[s] for s in _SLOT.findall(template.data) if s in ctx.published}
-        text = ctx.render(template, slots)
-        if not self._fits(ctx.route.destination, text.data):
-            out.append(Notice("script_too_long", text.id))
-            return out
-        dest = ctx.destination(ctx.route.destination, EXTERNAL_PRIVATE)
-        out.append(Proposal(Egress("msg.reply", dest, (text,)), lane=True))
-        return out
-
-    def _fits(self, destination: str, text: str) -> bool:
-        if destination.startswith("sms:"):
-            return len(text) <= self.config.sms_max_chars and text.isascii()
+    def fits(self, destination: str, text: str) -> bool:
         return len(text.encode()) <= self.config.email_max_bytes
 
-    def cluster(self, destination: str) -> str:
-        channel, _, addr = destination.partition(":")
-        if not addr:  # bare origin (e.g. for notices)
-            addr, channel = destination, ("sms" if destination.startswith("+") else "email")
-        if channel == "sms":
-            return f"sms:{addr[:5]}"
-        return f"email:{addr.rpartition('@')[2].lower()}"
+
+def cluster(destination: str) -> str:
+    channel, _, addr = destination.partition(":")
+    if not addr:  # bare origin (e.g. for notices)
+        addr, channel = destination, ("sms" if destination.startswith("+") else "email")
+    if channel == "sms":
+        return f"sms:{addr[:5]}"
+    return f"email:{addr.rpartition('@')[2].lower()}"
+
+
+class MessagingPack(ManifestPack):
+    def __init__(self, config: MessagingConfig | None = None) -> None:
+        self.config = config or MessagingConfig()
+        channels = (SmsChannel(self.config), EmailChannel(self.config))
+        super().__init__("messaging", SCHEMA, TOOLS, channels, RULES, cluster)

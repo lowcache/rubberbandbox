@@ -18,6 +18,7 @@ class KindSpec:
     read_only: bool = False  # a fetch: may stay inside if destination and payload are public
     publishes: bool = False  # irreversible publish: payload must be trusted unless the owner approves
     public_lane: bool = False  # may leave through the public lane (mail slot)
+    grantable: bool = True  # False: owner approval per egress (spend, delete, unreviewed tools)
 
 
 @dataclass(frozen=True)
@@ -27,12 +28,17 @@ class Egress:
     kind: str
     destination: Value
     payload: tuple[Value, ...]
+    control: tuple[Value, ...] = ()  # args that steer the tool (flags, modes)
 
     @property
     def digest(self) -> str:
         h = hashlib.sha256(self.kind.encode())
         for v in (self.destination, *self.payload):
             h.update(b"\0" + v.id.encode())
+        if self.control:  # absent control keeps pre-manifest digests stable
+            h.update(b"\1control")
+            for v in self.control:
+                h.update(b"\0" + v.id.encode())
         return h.hexdigest()
 
 
@@ -124,7 +130,9 @@ class Clerk(Protocol):
 class ToolAdapter(Protocol):
     """The outside world. Only the door holds adapters."""
 
-    def execute(self, kind: str, destination: str, payload: Sequence[str]) -> object: ...
+    def execute(self, kind: str, destination: str, payload: Sequence[str]) -> object:
+        """The door passes `control=[...]` as a keyword only when the egress has control args."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -140,7 +148,7 @@ class HandsView:
 
 
 class Hands(Protocol):
-    """The smart model. Returns raw proposals: {'kind', 'destination', 'payload'} where each
-    destination/payload item is {'ref': id} or {'literal': str}."""
+    """The smart model. Returns raw proposals: {'kind', 'destination', 'payload', 'control'?} where
+    each destination/payload/control item is {'ref': id} or {'literal': str}."""
 
     def propose(self, view: HandsView) -> object: ...

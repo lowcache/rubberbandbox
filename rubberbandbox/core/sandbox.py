@@ -60,6 +60,15 @@ class ManualClock:
         self.t += seconds
 
 
+def _grant_blocker(spec: KindSpec, eg: Egress) -> str | None:
+    """Why a covering grant still may not carry this egress (mirrors the invariant's grant path)."""
+    if spec.publishes and not all(v.label.trusted for v in eg.payload):
+        return "publish with untrusted payload"
+    if not spec.read_only and not all(v.label.trusted for v in eg.control):
+        return "untrusted control args"
+    return None
+
+
 class Sandbox:
     def __init__(
         self,
@@ -226,12 +235,18 @@ class Sandbox:
         # private work: stiffening applies here only
         if cluster in self.stiffened:
             return self._hold(eg, cluster, "cluster stiffened", now)
-        grant = self.grants.find(eg.kind, dest, now)
-        if grant is not None and not (spec.publishes and not all(v.label.trusted for v in eg.payload)):
+        grant = self.grants.find(eg.kind, dest, now) if spec.grantable else None
+        blocked = _grant_blocker(spec, eg)
+        if grant is not None and blocked is None:
             return Outcome(eg.kind, dest, *self._door.cross(eg, Authorization("grant", grant.id)))
-        if spec.read_only and eg.destination.label.public and all(v.label.public for v in eg.payload):
+        if spec.read_only and all(v.label.public for v in (eg.destination, *eg.payload, *eg.control)):
             return Outcome(eg.kind, dest, *self._door.cross(eg, Authorization("public_read", "")))
-        reason = "publish with untrusted payload" if grant is not None else "no grant covers this egress"
+        if not spec.grantable:
+            reason = "kind needs owner approval per egress"
+        elif grant is None:
+            reason = "no grant covers this egress"
+        else:
+            reason = blocked or ""
         return self._hold(eg, cluster, reason, now)
 
     def _hold(self, eg: Egress, cluster: str, reason: str, now: float) -> Outcome:
@@ -295,11 +310,15 @@ class Sandbox:
         payload_items = item.get("payload", [])
         if not isinstance(payload_items, list) or len(payload_items) > MAX_PROPOSALS:
             return None
+        control_items = item.get("control", [])
+        if not isinstance(control_items, list) or len(control_items) > MAX_PROPOSALS:
+            return None
         dest = self._hands_value(item.get("destination"), visible, context, now)
         payload = [self._hands_value(p, visible, context, now) for p in payload_items]
-        if dest is None or any(p is None for p in payload):
+        control = [self._hands_value(c, visible, context, now) for c in control_items]
+        if dest is None or any(p is None for p in (*payload, *control)):
             return None
-        return Egress(item["kind"], dest, tuple(payload))  # type: ignore[arg-type]
+        return Egress(item["kind"], dest, tuple(payload), tuple(control))  # type: ignore[arg-type]
 
     def _hands_value(self, x: object, visible: dict[str, Value], context: Label, now: float) -> Value | None:
         if not isinstance(x, dict) or len(x) != 1:
