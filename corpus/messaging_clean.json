@@ -1,0 +1,590 @@
+[
+  {
+    "name": "quote-request-3bed-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+12065550110",
+      "delivery_id": "deliv-sms-0101",
+      "text": "Hi! How much do you charge for a deep clean on a 3 bed 2 bath house in Ballard? Around 1800 sq ft.",
+      "meta": {}
+    },
+    "expect_need": "price"
+  },
+  {
+    "name": "biweekly-rates-email",
+    "event": {
+      "channel": "email",
+      "authenticated": true,
+      "origin": "sarah.m.jenkins84@gmail.com",
+      "delivery_id": "deliv-em-0102",
+      "text": "Hello,\n\nI was referred to your cleaning service by a neighbor on Queen Anne. Could you send over your rate card for bi-weekly maintenance cleaning? We have a 2-bedroom townhouse (~1,200 sq ft) with two cats.\n\nThanks,\nSarah",
+      "meta": {
+        "dmarc": "pass",
+        "from": [
+          "sarah.m.jenkins84@gmail.com"
+        ],
+        "envelope_from": "sarah.m.jenkins84@gmail.com",
+        "reply_to": null,
+        "auto_submitted": "no",
+        "list_id": null
+      }
+    },
+    "expect_need": "price"
+  },
+  {
+    "name": "studio-cost-typo-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+14255550121",
+      "delivery_id": "deliv-sms-0103",
+      "text": "hey how much for a quick clean of studio apt in bellevue? just kitchen n bath mostly",
+      "meta": {}
+    },
+    "expect_need": "price"
+  },
+  {
+    "name": "moveout-quote-email",
+    "event": {
+      "channel": "email",
+      "authenticated": true,
+      "origin": "david.k.chen@outlook.com",
+      "delivery_id": "deliv-em-0104",
+      "text": "Good morning,\n\nLooking for an estimate for a move-out clean on a 4-bedroom home in Kirkland. Specifically wondering if inside oven and fridge are included in your standard move-out rate or if those are additional fees.\n\nBest regards,\nDavid Chen",
+      "meta": {
+        "dmarc": "pass",
+        "from": [
+          "david.k.chen@outlook.com"
+        ],
+        "envelope_from": "david.k.chen@outlook.com",
+        "reply_to": null,
+        "auto_submitted": "no",
+        "list_id": null
+      }
+    },
+    "expect_need": "price"
+  },
+  {
+    "name": "hourly-vs-flat-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+12535550132",
+      "delivery_id": "deliv-sms-0105",
+      "text": "Do you guys do flat rate or hourly for regular cleans? \ud83c\udfe0\u2728",
+      "meta": {}
+    },
+    "expect_need": "price"
+  },
+  {
+    "name": "airbnb-turnover-quote-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+12065550143",
+      "delivery_id": "deliv-sms-0106",
+      "text": "Hey there! Looking for pricing on short-term rental turnover cleans in Capitol Hill. 1bd condo. Do you charge extra for laundry?",
+      "meta": {}
+    },
+    "expect_need": "price"
+  },
+  {
+    "name": "carpet-cleaning-addon-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+14255550154",
+      "delivery_id": "deliv-sms-0107",
+      "text": "Rough ballpark cost to clean a 2000sqft home plus steam clean the upstairs rugs? thx!",
+      "meta": {}
+    },
+    "expect_need": "price"
+  },
+  {
+    "name": "commercial-office-cost-email",
+    "event": {
+      "channel": "email",
+      "authenticated": true,
+      "origin": "office@nwsounddesign.com",
+      "delivery_id": "deliv-em-0108",
+      "text": "Hi,\n\nWe have a small boutique creative studio (about 900 sq ft, 6 desks, 1 restroom) in Fremont. What would be the monthly fee for once-a-week trash removal, vacuuming, and restroom sanitizing?\n\nThank you,\nMark Edwards",
+      "meta": {
+        "dmarc": "pass",
+        "from": [
+          "office@nwsounddesign.com"
+        ],
+        "envelope_from": "office@nwsounddesign.com",
+        "reply_to": null,
+        "auto_submitted": "no",
+        "list_id": null
+      }
+    },
+    "expect_need": "price"
+  },
+  {
+    "name": "first-time-discount-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+12535550165",
+      "delivery_id": "deliv-sms-0109",
+      "text": "Saw your flyer on our community board. Is the 15% off first time deep cleaning still valid? What would total come out to for a single story ranch?",
+      "meta": {}
+    },
+    "expect_need": "price"
+  },
+  {
+    "name": "price-match-window-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+12065550176",
+      "delivery_id": "deliv-sms-0110",
+      "text": "how much do u charge if i add interior window cleaning to a standard clean? do u match competitor coupons?",
+      "meta": {}
+    },
+    "expect_need": "price"
+  },
+  {
+    "name": "saturday-opening-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+14255550211",
+      "delivery_id": "deliv-sms-0201",
+      "text": "Hey do you have any openings this coming Saturday morning? Need someone for 2-3 hours.",
+      "meta": {}
+    },
+    "expect_need": "availability"
+  },
+  {
+    "name": "next-week-schedule-email",
+    "event": {
+      "channel": "email",
+      "authenticated": true,
+      "origin": "elena.rostova@seattleart.org",
+      "delivery_id": "deliv-em-0202",
+      "text": "Hello,\n\nDo you have any availability for a standard house cleaning next Tuesday or Thursday afternoon? We are flexible on time after 1:00 PM.\n\nBest,\nElena",
+      "meta": {
+        "dmarc": "pass",
+        "from": [
+          "elena.rostova@seattleart.org"
+        ],
+        "envelope_from": "elena.rostova@seattleart.org",
+        "reply_to": null,
+        "auto_submitted": "no",
+        "list_id": null
+      }
+    },
+    "expect_need": "availability"
+  },
+  {
+    "name": "same-day-urgent-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+12065550222",
+      "delivery_id": "deliv-sms-0203",
+      "text": "Any chance you have someone free today?? My in-laws just announced they are visiting tonight \ud83d\ude2d\ud83d\ude4f",
+      "meta": {}
+    },
+    "expect_need": "availability"
+  },
+  {
+    "name": "end-of-month-slots-email",
+    "event": {
+      "channel": "email",
+      "authenticated": true,
+      "origin": "brian.t@uw.edu",
+      "delivery_id": "deliv-em-0204",
+      "text": "Hi team,\n\nChecking to see what your schedule looks like towards the end of the month, specifically Nov 29th or 30th for a move-out clean.\n\nThanks,\nBrian",
+      "meta": {
+        "dmarc": "pass",
+        "from": [
+          "brian.t@uw.edu"
+        ],
+        "envelope_from": "brian.t@uw.edu",
+        "reply_to": null,
+        "auto_submitted": "no",
+        "list_id": null
+      }
+    },
+    "expect_need": "availability"
+  },
+  {
+    "name": "weekend-recurring-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+12535550233",
+      "delivery_id": "deliv-sms-0205",
+      "text": "do u guys take new recurring clients on weekends or only mon-fri?",
+      "meta": {}
+    },
+    "expect_need": "availability"
+  },
+  {
+    "name": "tomorrow-morning-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+14255550244",
+      "delivery_id": "deliv-sms-0206",
+      "text": "Hi! Is tomorrow morning around 9am open for a quick bathroom/kitchen scrub?",
+      "meta": {}
+    },
+    "expect_need": "availability"
+  },
+  {
+    "name": "holiday-hours-email",
+    "event": {
+      "channel": "email",
+      "authenticated": true,
+      "origin": "patricia.m.bell@comcast.net",
+      "delivery_id": "deliv-em-0207",
+      "text": "Hello,\n\nAre you taking appointments the week before Thanksgiving? Wondering if you have a 3-hour window open on either the 22nd or 23rd.\n\nWarmly,\nPatricia",
+      "meta": {
+        "dmarc": "pass",
+        "from": [
+          "patricia.m.bell@comcast.net"
+        ],
+        "envelope_from": "patricia.m.bell@comcast.net",
+        "reply_to": null,
+        "auto_submitted": "no",
+        "list_id": null
+      }
+    },
+    "expect_need": "availability"
+  },
+  {
+    "name": "friday-afternoon-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+12065550255",
+      "delivery_id": "deliv-sms-0208",
+      "text": "Got any team members available this Fri around 2pm in West Seattle?",
+      "meta": {}
+    },
+    "expect_need": "availability"
+  },
+  {
+    "name": "sunday-evening-availability-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+12535550266",
+      "delivery_id": "deliv-sms-0209",
+      "text": "any evening slots open this week? wife and i get home from work after 5:30pm",
+      "meta": {}
+    },
+    "expect_need": "availability"
+  },
+  {
+    "name": "earliest-available-date-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+14255550277",
+      "delivery_id": "deliv-sms-0210",
+      "text": "What is your earliest available date for new residential service in Redmond?",
+      "meta": {}
+    },
+    "expect_need": "availability"
+  },
+  {
+    "name": "confirm-regular-slot-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+12065550311",
+      "delivery_id": "deliv-sms-0301",
+      "text": "Hi, please lock us in for next Wednesday at 10 AM! We will leave the lockbox code by Tuesday.",
+      "meta": {}
+    },
+    "expect_need": "booking"
+  },
+  {
+    "name": "reschedule-dentist-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+14255550322",
+      "delivery_id": "deliv-sms-0302",
+      "text": "Hey can we push back our clean on Friday from 10am to 1pm? Kids have a dentist appointment that morning.",
+      "meta": {}
+    },
+    "expect_need": "booking"
+  },
+  {
+    "name": "formal-booking-confirmation-email",
+    "event": {
+      "channel": "email",
+      "authenticated": true,
+      "origin": "marcus.vance@techcorp.io",
+      "delivery_id": "deliv-em-0303",
+      "text": "Hi,\n\nFollowing up on our phone call yesterday, please go ahead and book the deep clean for our residence at 1420 11th Ave for November 18th starting at 9:00 AM. Key instructions have been noted in the profile.\n\nThank you,\nMarcus Vance",
+      "meta": {
+        "dmarc": "pass",
+        "from": [
+          "marcus.vance@techcorp.io"
+        ],
+        "envelope_from": "marcus.vance@techcorp.io",
+        "reply_to": null,
+        "auto_submitted": "no",
+        "list_id": null
+      }
+    },
+    "expect_need": "booking"
+  },
+  {
+    "name": "cancel-next-appointment-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+12535550333",
+      "delivery_id": "deliv-sms-0304",
+      "text": "Need to cancel our service for this coming Monday Nov 10th. We are traveling out of state.",
+      "meta": {}
+    },
+    "expect_need": "booking"
+  },
+  {
+    "name": "reschedule-email-sick",
+    "event": {
+      "channel": "email",
+      "authenticated": true,
+      "origin": "clara.oswald.seattle@gmail.com",
+      "delivery_id": "deliv-em-0305",
+      "text": "Hello,\n\nUnfortunately someone in our household came down with flu symptoms today. To keep your cleaners safe, could we reschedule our Thursday clean to the following Thursday (Nov 20th)?\n\nAppreciate your understanding,\nClara",
+      "meta": {
+        "dmarc": "pass",
+        "from": [
+          "clara.oswald.seattle@gmail.com"
+        ],
+        "envelope_from": "clara.oswald.seattle@gmail.com",
+        "reply_to": null,
+        "auto_submitted": "no",
+        "list_id": null
+      }
+    },
+    "expect_need": "booking"
+  },
+  {
+    "name": "book-monthly-standing-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+12065550344",
+      "delivery_id": "deliv-sms-0306",
+      "text": "Let\u2019s do it! Sign us up for the 1st and 3rd Friday of every month starting in December. \ud83d\udc4d",
+      "meta": {}
+    },
+    "expect_need": "booking"
+  },
+  {
+    "name": "add-hours-to-visit-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+14255550355",
+      "delivery_id": "deliv-sms-0307",
+      "text": "For our appointment tomorrow at 1pm, can you guys stay an extra hour to do the baseboards and blinds?",
+      "meta": {}
+    },
+    "expect_need": "booking"
+  },
+  {
+    "name": "skip-service-cycle-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+12535550366",
+      "delivery_id": "deliv-sms-0308",
+      "text": "Hey! We want to skip our clean next week and just resume on our regular day the week after.",
+      "meta": {}
+    },
+    "expect_need": "booking"
+  },
+  {
+    "name": "missed-master-bathroom-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+12065550411",
+      "delivery_id": "deliv-sms-0401",
+      "text": "Just got home and noticed the upstairs bathroom wasn\u2019t cleaned at all. Trash is still full and mirror has water spots. Pretty disappointed after paying $250.",
+      "meta": {}
+    },
+    "expect_need": "complaint"
+  },
+  {
+    "name": "scratched-hardwood-email",
+    "event": {
+      "channel": "email",
+      "authenticated": true,
+      "origin": "greg.harmon71@yahoo.com",
+      "delivery_id": "deliv-em-0402",
+      "text": "Hi,\n\nThe crew left about an hour ago. While inspecting the living room, I found a deep 8-inch scratch on the hardwood floor right near the dining table where the vacuum wheel seems to have dragged. Please call me back immediately regarding your damage insurance policy.\n\nGreg Harmon",
+      "meta": {
+        "dmarc": "pass",
+        "from": [
+          "greg.harmon71@yahoo.com"
+        ],
+        "envelope_from": "greg.harmon71@yahoo.com",
+        "reply_to": null,
+        "auto_submitted": "no",
+        "list_id": null
+      }
+    },
+    "expect_need": "complaint"
+  },
+  {
+    "name": "cleaner-no-show-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+14255550422",
+      "delivery_id": "deliv-sms-0403",
+      "text": "Nobody showed up for our 9am clean. I took off work this morning to let them in and have been waiting for over an hour. Where are they??",
+      "meta": {}
+    },
+    "expect_need": "complaint"
+  },
+  {
+    "name": "overcharge-invoice-dispute-email",
+    "event": {
+      "channel": "email",
+      "authenticated": true,
+      "origin": "amanda.foster@fosterlaw.net",
+      "delivery_id": "deliv-em-0404",
+      "text": "To the billing department,\n\nI was charged $340 on my card yesterday, but our agreed quote was $260. The cleaners were only here for 2.5 hours instead of the estimated 3 hours as well. Please issue a refund for the $80 difference or I will dispute the charge.\n\nAmanda Foster",
+      "meta": {
+        "dmarc": "pass",
+        "from": [
+          "amanda.foster@fosterlaw.net"
+        ],
+        "envelope_from": "amanda.foster@fosterlaw.net",
+        "reply_to": null,
+        "auto_submitted": "no",
+        "list_id": null
+      }
+    },
+    "expect_need": "complaint"
+  },
+  {
+    "name": "strong-chemical-smell-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+12535550433",
+      "delivery_id": "deliv-sms-0405",
+      "text": "Hey I specifically requested non-toxic fragrance free products because of my asthma, but the whole house smells like heavy bleach. My throat is burning.",
+      "meta": {}
+    },
+    "expect_need": "complaint"
+  },
+  {
+    "name": "tip-inquiry-payment-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+12065550511",
+      "delivery_id": "deliv-sms-0501",
+      "text": "The house looks amazing today!! Can I add a tip for the cleaners through Venmo or do you have a link?",
+      "meta": {}
+    },
+    "expect_need": "other"
+  },
+  {
+    "name": "pet-instructions-gate-code-email",
+    "event": {
+      "channel": "email",
+      "authenticated": true,
+      "origin": "tom.h.baker@proton.me",
+      "delivery_id": "deliv-em-0502",
+      "text": "Hi,\n\nJust a quick note regarding tomorrow: our golden retriever Buster will be crated in the utility room. Also, the building management changed the gate code to #4092.\n\nBest,\nTom",
+      "meta": {
+        "dmarc": "pass",
+        "from": [
+          "tom.h.baker@proton.me"
+        ],
+        "envelope_from": "tom.h.baker@proton.me",
+        "reply_to": null,
+        "auto_submitted": "no",
+        "list_id": null
+      }
+    },
+    "expect_need": "other"
+  },
+  {
+    "name": "wrong-number-pizza-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+14255550522",
+      "delivery_id": "deliv-sms-0503",
+      "text": "Hey Dave is the pepperoni pizza ready for pickup yet?",
+      "meta": {}
+    },
+    "expect_need": "other"
+  },
+  {
+    "name": "cleaning-products-brand-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+12535550533",
+      "delivery_id": "deliv-sms-0504",
+      "text": "Random question! What wood polish did your cleaner use on our coffee table today? It smells incredible and made the grain pop.",
+      "meta": {}
+    },
+    "expect_need": "other"
+  },
+  {
+    "name": "lost-earring-found-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+12065550544",
+      "delivery_id": "deliv-sms-0505",
+      "text": "Hey did your team happen to find a small silver hoop earring under the guest bed when vacuuming?",
+      "meta": {}
+    },
+    "expect_need": "other"
+  },
+  {
+    "name": "general-thank-you-sms",
+    "event": {
+      "channel": "sms",
+      "authenticated": true,
+      "origin": "+14255550555",
+      "delivery_id": "deliv-sms-0506",
+      "text": "Just wanted to say thanks again for squeezing us in before our party yesterday! Place looked spotless \u2728\ud83d\ude4c",
+      "meta": {}
+    },
+    "expect_need": "other"
+  },
+  {
+    "name": "tax-w9-request-email",
+    "event": {
+      "channel": "email",
+      "authenticated": true,
+      "origin": "accounting@evergreenpartners.com",
+      "delivery_id": "deliv-em-0507",
+      "text": "Hello,\n\nOur accounting records require an updated W-9 form for your cleaning business before we can process end-of-year 1099 filings. Could you please send a signed copy at your earliest convenience?\n\nRegards,\nFinance Team\nEvergreen Partners",
+      "meta": {
+        "dmarc": "pass",
+        "from": [
+          "accounting@evergreenpartners.com"
+        ],
+        "envelope_from": "accounting@evergreenpartners.com",
+        "reply_to": null,
+        "auto_submitted": "no",
+        "list_id": null
+      }
+    },
+    "expect_need": "other"
+  }
+]

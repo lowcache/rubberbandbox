@@ -1,0 +1,13 @@
+[project]
+name = "rubbersand"
+version = "0.1.0"
+description = "Rubber Sandbox: elastic, provenance-tracked sandboxing for LLM agents (reference implementation)"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest", "hypothesis"]
+claude = ["anthropic>=1.8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
