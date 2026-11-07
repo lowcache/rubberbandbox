@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import random
 from dataclasses import dataclass
-from typing import Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Callable, Mapping, Sequence
 
 from .approvals import Approvals, Digest, DigestConfig
 from .casefile import AirlockViolation, CaseFile, validate
@@ -13,6 +13,7 @@ from .door import Door
 from .grants import Grant, GrantBook
 from .labels import EXTERNAL_PRIVATE, OWNER_PRIVATE, OWNER_PUBLIC, Label, Value, join_all, join_proven
 from .public_lane import LaneConfig, PublicLane
+from .registry import PATH_MOVED
 from .store import Store
 from .types import (
     Authorization,
@@ -30,6 +31,9 @@ from .types import (
     ToolAdapter,
 )
 
+if TYPE_CHECKING:
+    from .registry import ManifestRegistry
+
 MAX_PROPOSALS = 16
 MAX_LITERAL = 2048
 
@@ -39,7 +43,7 @@ class Mount:
     """A pack and the clerk that reads its inbound content."""
 
     pack: Pack
-    clerk: Clerk
+    clerk: Clerk | None  # None: inbound on its channels fails closed at the airlock
 
 
 @dataclass(frozen=True)
@@ -109,6 +113,12 @@ class Sandbox:
         self.published: dict[str, Value] = {}
         self.workspace: list[Value] = []
         self.stiffened: set[str] = set()
+        self.registry: ManifestRegistry | None = None
+
+    def attach(self, registry: ManifestRegistry) -> None:
+        """The registry binds named tool calls; the door re-checks every one against it."""
+        self.registry = registry
+        self._door.calls = registry.check_egress
 
     # ---- owner side: the only places trust is minted or lowered ----
 
@@ -136,6 +146,10 @@ class Sandbox:
             return Outcome("?", "?", "refused", "no such approval")
         auth = self.approvals.approve(aid, now)
         status, reason = self._door.cross(egress, auth)
+        if status == "refused" and self.registry is not None and reason.startswith(PATH_MOVED):
+            fresh = self.registry.rebind(egress)  # a different file than the owner approved: ask again
+            if isinstance(fresh, Egress):
+                return self._hold(fresh, self._cluster(fresh.destination.data, self._kind_owner[fresh.kind]), reason, now)
         return Outcome(egress.kind, egress.destination.data, status, reason)
 
     def owner_deny(self, aid: str) -> None:
@@ -305,7 +319,8 @@ class Sandbox:
             vid: f"source={v.source} trusted={'yes' if v.label.trusted else 'no'} public={'yes' if v.label.public else 'no'}"
             for vid, v in visible.items()
         }
-        return HandsView(dict(cf.fields), tokens, cf.schema), visible
+        tools = self.registry.catalog() if self.registry else {}
+        return HandsView(dict(cf.fields), tokens, cf.schema, tools), visible
 
     def _from_hands(self, cf: CaseFile, raw: Value, now: float) -> list[Proposal]:
         assert self.hands is not None
@@ -325,15 +340,17 @@ class Sandbox:
         out: list[Proposal] = []
         for item in proposed[:MAX_PROPOSALS]:
             eg = self._hands_egress(item, visible, context, now)
-            if eg is None:
-                self.store.audit(now, "hands.malformed", reason="bad proposal")
+            if not isinstance(eg, Egress):
+                self.store.audit(now, "hands.malformed", reason=eg or "bad proposal")
                 continue
             out.append(Proposal(eg))
         return out
 
-    def _hands_egress(self, item: object, visible: dict[str, Value], context: Label, now: float) -> Egress | None:
+    def _hands_egress(self, item: object, visible: dict[str, Value], context: Label, now: float) -> Egress | str | None:
         if not isinstance(item, dict) or not isinstance(item.get("kind"), str):
             return None
+        if "args" in item:
+            return self._hands_call(item["kind"], item["args"], visible, context, now)
         payload_items = item.get("payload", [])
         if not isinstance(payload_items, list) or len(payload_items) > MAX_PROPOSALS:
             return None
@@ -346,6 +363,14 @@ class Sandbox:
         if dest is None or any(p is None for p in (*payload, *control)):
             return None
         return Egress(item["kind"], dest, tuple(payload), tuple(control))  # type: ignore[arg-type]
+
+    def _hands_call(self, kind: str, items: object, visible: dict[str, Value], context: Label, now: float) -> Egress | str | None:
+        if self.registry is None or not isinstance(items, dict) or len(items) > MAX_PROPOSALS:
+            return None
+        args = {a: self._hands_value(x, visible, context, now) for a, x in items.items() if isinstance(a, str)}
+        if len(args) != len(items) or any(v is None for v in args.values()):
+            return None
+        return self.registry.bind(kind, args)  # type: ignore[arg-type]
 
     def _hands_value(self, x: object, visible: dict[str, Value], context: Label, now: float) -> Value | None:
         if not isinstance(x, dict) or len(x) != 1:

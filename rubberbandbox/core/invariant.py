@@ -47,7 +47,7 @@ def check(
         grant = grants.get_active(auth.ref, now)
         if grant is None:
             return "grant missing, ended, or expired"
-        if egress.kind not in grant.kinds or egress.destination.data not in grant.destinations:
+        if egress.kind not in grant.kinds or not grant.covers(egress.destination.data):
             return "grant does not cover this kind and destination"
         if spec.publishes and not all(v.label.trusted for v in egress.payload):
             return "publish with untrusted payload needs owner approval"

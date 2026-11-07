@@ -187,7 +187,7 @@ class Rec:
     def __init__(self):
         self.log = []
 
-    def execute(self, kind, destination, payload, control=None):
+    def execute(self, kind, destination, payload, control=None, args=None):
         self.log.append((kind, destination, list(payload), control))
 
 
@@ -224,7 +224,8 @@ def env():
 
 def write(sb, mode="append", mode_label=OWNER_PRIVATE):
     v = lambda d, l: sb.store.put(d, l, "test", sb.clock())
-    return Egress("fs/write", v("/srv/out", OWNER_PRIVATE), (v("hi", EXTERNAL_PRIVATE),), (v(mode, mode_label),))
+    return Egress("fs/write", v("/srv/out", OWNER_PRIVATE), (v("hi", EXTERNAL_PRIVATE),), (v(mode, mode_label),),
+                  ("path", "data", "mode"))
 
 
 def route(sb, eg, lane=False, receipt=None):
@@ -272,13 +273,15 @@ def test_loosening_reverts_the_tool_and_invalidates_everything_issued_for_it(env
     approved = route(sb, write(sb, "x", EXTERNAL_PRIVATE)).reason.split(":")[0]
     sb.approvals.approve(approved, clock())  # approved but not yet crossed
     body = sb.owner_publish("ack", "Got it.")
-    eg = Egress("chat/reply", sb.store.put("chat:u1", EXTERNAL_PRIVATE, "t", clock()), (body,))
+    eg = Egress("chat/reply", sb.store.put("chat:u1", EXTERNAL_PRIVATE, "t", clock()), (body,), (), ("to", "body"))
     assert route(sb, eg, lane=True, receipt=RouteReceipt("chat:u1", "d1", 0.0, clock())).status == "scheduled"
 
     loose = desc(edit(mode={"type": "string"}))
     assert reg.observe(loose).loosened == ("mode: enum widened or dropped",)
 
     assert sb.grants.get_active(g.id, clock()) is None  # grant ended (it named the tool)
+    # inner layer directly: the door's role check would also refuse these, masking a missed invalidation
+    assert {s for (s,) in sb.store.db.execute("SELECT status FROM approvals")} == {"invalidated"}
     assert sb.owner_approve(held).status == "refused" and sb.owner_approve(approved).status == "refused"
     assert route(sb, write(sb)).status == "held"  # conservative default: approval per call
     reg.observe(reply_desc(schema={"type": "object", "properties": {"to": {}, "body": {"type": "string"}}}))

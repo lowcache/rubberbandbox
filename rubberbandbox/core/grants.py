@@ -9,6 +9,23 @@ from .labels import Value
 from .store import Store, parse_id
 
 
+def _parts(path: str) -> tuple[str, ...] | None:
+    """Components of an absolute, lexically normal path, else None."""
+    if not path.startswith("/") or "\0" in path:
+        return None
+    parts = tuple(path[1:].split("/")) if path != "/" else ()
+    return None if any(p in ("", ".", "..") for p in parts) else parts
+
+
+def covers(granted: str, destination: str) -> bool:
+    """Exact match, or for paths a whole-component prefix: /data/notes covers /data/notes/a,
+    never /data/notes-secret. Destinations must already be canonical (see the registry)."""
+    if granted == destination:
+        return True
+    g, d = _parts(granted), _parts(destination)
+    return g is not None and d is not None and d[:len(g)] == g
+
+
 class ScopeError(TypeError):
     """Raised when something other than owner-typed text tries to mint scope."""
 
@@ -19,6 +36,9 @@ class Grant:
     kinds: frozenset[str]
     destinations: frozenset[str]
     expires_at: float
+
+    def covers(self, destination: str) -> bool:
+        return any(covers(g, destination) for g in self.destinations)
 
 
 class GrantBook:
@@ -31,6 +51,9 @@ class GrantBook:
         for d in destinations:
             if isinstance(d, Value) or not isinstance(d, str):
                 raise ScopeError("grant destinations must be owner-typed strings, not resolved values")
+        bad = [d for d in destinations if d.startswith("/") and _parts(d) is None]
+        if bad:
+            raise ValueError(f"path grants must be absolute and normal: {bad}")
         if ttl <= 0:
             raise ValueError("ttl must be positive")
         cur = self.store.db.execute(
@@ -64,6 +87,6 @@ class GrantBook:
         ).fetchall()
         for (rid,) in rows:
             g = self.get_active(f"G{rid}", now)
-            if g and kind in g.kinds and destination in g.destinations:
+            if g and kind in g.kinds and g.covers(destination):
                 return g
         return None

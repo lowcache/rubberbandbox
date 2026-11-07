@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass, field
 from typing import Literal, Mapping, Protocol, Sequence
 
@@ -29,6 +30,19 @@ class Egress:
     destination: Value
     payload: tuple[Value, ...]
     control: tuple[Value, ...] = ()  # args that steer the tool (flags, modes)
+    names: tuple[str, ...] = ()  # tool-call arg names for (destination, *payload, *control); '' = operator
+
+    def __post_init__(self) -> None:
+        if self.names:
+            if len(self.names) != 1 + len(self.payload) + len(self.control) or "" in self.names[1:] \
+                    or len(set(self.names)) != len(self.names):
+                raise ValueError("names must label each destination/payload/control position once")
+
+    @property
+    def args(self) -> dict[str, str]:
+        """The named call arguments; the operator destination is implicit, not an arg."""
+        values = (self.destination, *self.payload, *self.control)
+        return {n: v.data for n, v in zip(self.names, values) if n}
 
     @property
     def digest(self) -> str:
@@ -39,6 +53,8 @@ class Egress:
             h.update(b"\1control")
             for v in self.control:
                 h.update(b"\0" + v.id.encode())
+        if self.names:
+            h.update(b"\2names" + json.dumps(self.names).encode())
         return h.hexdigest()
 
 
@@ -131,7 +147,8 @@ class ToolAdapter(Protocol):
     """The outside world. Only the door holds adapters."""
 
     def execute(self, kind: str, destination: str, payload: Sequence[str]) -> object:
-        """The door passes `control=[...]` as a keyword only when the egress has control args."""
+        """The door passes `control=[...]` only when the egress has control args, and `args={...}`
+        only for named tool calls. A non-None return is stored as a labeled output."""
         ...
 
 
@@ -145,10 +162,12 @@ class HandsView:
     casefile: Mapping[str, object]
     visible: Mapping[str, str]
     schema: str = ""  # which pack's case file this is, for agents spanning several packs
+    tools: Mapping[str, object] = field(default_factory=dict)  # frozen approved manifests, by kind
 
 
 class Hands(Protocol):
-    """The smart model. Returns raw proposals: {'kind', 'destination', 'payload', 'control'?} where
-    each destination/payload/control item is {'ref': id} or {'literal': str}."""
+    """The smart model. Returns raw proposals: {'kind', 'destination', 'payload', 'control'?}, or
+    {'kind', 'args': {name: item}} for a registry tool, where each item is {'ref': id} or
+    {'literal': str}."""
 
     def propose(self, view: HandsView) -> object: ...

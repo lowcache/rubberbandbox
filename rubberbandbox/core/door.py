@@ -8,6 +8,7 @@ from typing import Callable, Mapping
 
 from . import invariant
 from .grants import GrantBook
+from .labels import EXTERNAL_PRIVATE, EXTERNAL_PUBLIC
 from .store import Store, egress_blob, egress_from_blob, parse_id
 from .types import Authorization, Egress, KindSpec, ToolAdapter
 
@@ -31,6 +32,15 @@ class Door:
         self._kinds = dict(kinds)
         self._adapters = dict(adapters)
         self._clock = clock
+        self.calls: Callable[[Egress], str | None] | None = None  # the registry's tool-call check
+
+    def _check(self, egress: Egress, auth: Authorization, at: float) -> str | None:
+        reason = invariant.check(egress, auth, self._kinds, self._store, self._grants, at)
+        if reason is None and self.calls is not None:
+            reason = self.calls(egress)
+        elif reason is None and egress.names:
+            reason = "named tool call with no registry to check it"
+        return reason
 
     def set_kind(self, spec: KindSpec) -> None:
         if spec.name not in self._kinds:
@@ -47,7 +57,7 @@ class Door:
                 "SELECT send_at FROM receipts WHERE id=?", (rid,)).fetchone()
             send_at = row[0] if row else None
         at = max(now, send_at) if send_at is not None else now  # validity at the moment it would leave
-        reason = invariant.check(egress, auth, self._kinds, self._store, self._grants, at)
+        reason = self._check(egress, auth, at)
         if reason:
             self._store.audit(now, "door.refused", kind=egress.kind, dest=egress.destination.id, auth=auth.kind, reason=reason)
             return "refused", reason
@@ -80,7 +90,8 @@ class Door:
     def _execute(self, egress: Egress, auth: Authorization) -> tuple[str, str]:
         with self._store.tx():
             now = self._clock()  # fresh per crossing: a slow adapter must not age earlier checks
-            reason = invariant.check(egress, auth, self._kinds, self._store, self._grants, now)
+            reason = self._check(egress, auth, now)
+            spec = self._kinds.get(egress.kind)
             if reason is None and auth.kind in _CONSUME:
                 table, prefix = _CONSUME[auth.kind]
                 self._store.db.execute(f"UPDATE {table} SET consumed=1 WHERE id=?", (parse_id(auth.ref, prefix),))
@@ -88,10 +99,22 @@ class Door:
             self._store.audit(now, "door.refused", kind=egress.kind, dest=egress.destination.id, auth=auth.kind, reason=reason)
             return "refused", reason
         try:
-            extra = {"control": [v.data for v in egress.control]} if egress.control else {}
-            self._adapters[egress.kind].execute(egress.kind, egress.destination.data, [v.data for v in egress.payload], **extra)
+            extra: dict[str, object] = {"control": [v.data for v in egress.control]} if egress.control else {}
+            if egress.names:
+                extra["args"] = egress.args
+            result = self._adapters[egress.kind].execute(
+                egress.kind, egress.destination.data, [v.data for v in egress.payload], **extra)
         except Exception as exc:  # the outside world refused (e.g. provider hard cap)
             self._store.audit(now, "door.failed", kind=egress.kind, dest=egress.destination.id, error=repr(exc))
             return "failed", repr(exc)
-        self._store.audit(now, "door.sent", kind=egress.kind, dest=egress.destination.id, auth=auth.kind, ref=auth.ref)
+        out = {} if result is None else {"output": self._output(egress, spec, result, now)}
+        self._store.audit(now, "door.sent", kind=egress.kind, dest=egress.destination.id, auth=auth.kind, ref=auth.ref, **out)
         return "sent", auth.kind
+
+    def _output(self, egress: Egress, spec: KindSpec, result: object, now: float) -> str:
+        """Store what the tool returned: external, public only for a public read that sent nothing
+        private (anything private that went out may come back as an echo)."""
+        sent = (egress.destination, *egress.payload, *egress.control)
+        label = EXTERNAL_PUBLIC if spec.read_only and all(v.label.public for v in sent) else EXTERNAL_PRIVATE
+        data = result if isinstance(result, str) else json.dumps(result, sort_keys=True, default=str)
+        return self._store.put(data, label, f"output:{egress.kind}", now).id

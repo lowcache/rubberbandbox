@@ -7,17 +7,21 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Iterable, Mapping
+from dataclasses import asdict, dataclass, field, replace
+from typing import TYPE_CHECKING, Iterable, Mapping, Protocol
 
+from .labels import OWNER_PUBLIC, Value
 from .manifest import ToolManifest, compile_kind, conservative
+from .types import Egress, KindSpec
 
 if TYPE_CHECKING:
     from .sandbox import Sandbox
 
 # Unannotated means the unsafe value; a flip toward it is a loosening.
 HINT_DEFAULTS = {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": True}
-OVERRIDABLE = frozenset({"annotations", "destination_like"})  # owner may override; the rest are structural
+OVERRIDABLE = frozenset({"annotations", "destination_like", "path_like"})  # owner may override; the rest are structural
+PATH_MOVED = "path moved since approval"
+_BOX_LISTS = ("folders", "ro_paths", "sockets")  # box allowlists: removing entries is a tightening
 
 _RANK = {"read-public": 0, "read-private": 1, "write-staged": 2, "send": 3, "publish": 4, "spend": 5, "delete": 5}
 _PROSE = frozenset({"description", "title", "examples", "$comment", "$schema", "$id"})
@@ -29,6 +33,8 @@ _EXACT = ("pattern", "format", "const", "multipleOf")
 _KNOWN = frozenset({"type", "enum", *_UPPER, *_LOWER, *_EXACT})
 _DEST_FORMATS = frozenset({"uri", "uri-reference", "iri", "url", "email", "idn-email", "hostname",
                            "idn-hostname", "ipv4", "ipv6"})
+_PATH_NAMES = re.compile(r"(^|_)(path|paths|file|files|filename|dir|dirs|directory|folder|source|src|"
+                         r"destination|dest|dst|target)($|_)")
 _DEST_NAMES = re.compile(r"(^|_)(url|uri|to|cc|bcc|recipients?|email|phone|webhook|endpoint|host|hostname|"
                          r"address|callback|destination|dest)($|_)")
 
@@ -46,6 +52,16 @@ class ToolDescriptor:
     @property
     def kind(self) -> str:
         return f"{self.server}/{self.name}"
+
+
+class Resolver(Protocol):
+    """A box's view of its own filesystem (the MCP client of a boxed local server)."""
+
+    generation: int  # changes whenever the box restarts
+
+    def resolve(self, path: str) -> str:
+        """The canonical path; raises ValueError on a reject or a stopped box."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -165,12 +181,29 @@ def _widened(a: Mapping, b: Mapping) -> str | None:
     return None
 
 
+def _narrowed(old: str, new: str) -> bool:
+    """A box that only lost allowlist entries (folders, read-only paths, sockets) is tighter."""
+    try:
+        a, b = json.loads(old.removeprefix("stdio:")), json.loads(new.removeprefix("stdio:"))
+    except ValueError:
+        return False
+    if not (isinstance(a, dict) and isinstance(b, dict)) or {k: v for k, v in a.items() if k not in _BOX_LISTS} != \
+            {k: v for k, v in b.items() if k not in _BOX_LISTS}:
+        return False
+    for k in _BOX_LISTS:
+        x, y = a.get(k, []), b.get(k, [])
+        pairs = (lambda v: {_canon(i) for i in (v.items() if isinstance(v, dict) else v)})
+        if type(x) is not type(y) or not pairs(y) <= pairs(x):
+            return False
+    return True
+
+
 def diff(old: dict, new: dict, roles: Mapping[str, str]) -> Change:
     added: list[str] = []
     loose: list[str] = []
     other: list[str] = []
     if old["endpoint"] != new["endpoint"]:
-        loose.append("endpoint changed")
+        (other if _narrowed(old["endpoint"], new["endpoint"]) else loose).append("endpoint changed")
     for hint, unsafe in HINT_DEFAULTS.items():
         a, b = old["hints"][hint], new["hints"][hint]
         if a != b:
@@ -207,7 +240,7 @@ def _destination_like(arg: str, schema: object) -> bool:
     return bool(_DEST_NAMES.search(snake)) or fmt in _DEST_FORMATS
 
 
-def bones(m: ToolManifest, desc: ToolDescriptor) -> list[Problem]:
+def bones(m: ToolManifest, desc: ToolDescriptor, boxed: bool = False) -> list[Problem]:
     """Structural checks before the owner ever sees a draft. They catch structural loosening,
     not a wrong-but-legal classification (that is the honest limit)."""
     view = security_view(desc, "")
@@ -228,6 +261,11 @@ def bones(m: ToolManifest, desc: ToolDescriptor) -> list[Problem]:
         for arg, schema in view["args"].items():
             if arg in m.args and m.args[arg] != "destination" and _destination_like(arg, schema):
                 out.append(Problem("destination_like", f"{arg} looks like a destination, filed as {m.args[arg]}"))
+    if boxed:  # in a box, destination args are the paths that get canonicalised and grant-checked
+        for arg in view["args"]:
+            snake = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", arg).lower()
+            if arg in m.args and m.args[arg] != "destination" and _PATH_NAMES.search(snake):
+                out.append(Problem("path_like", f"{arg} looks like a path, filed as {m.args[arg]}"))
     return out
 
 
@@ -260,10 +298,14 @@ class ManifestRegistry:
     """Holds the owner-approved manifest per tool and reconciles it with what servers report.
     Server identity comes from owner config (`endpoints`), never from the server itself."""
 
-    def __init__(self, sandbox: Sandbox, endpoints: Mapping[str, str]) -> None:
+    def __init__(self, sandbox: Sandbox, endpoints: Mapping[str, str], boxes: Mapping[str, Resolver] = {}) -> None:
         self.sb = sandbox
         self.endpoints = dict(endpoints)
+        self.boxes = dict(boxes)  # server -> its box; destination args there are box paths
+        self._minted: dict[str, tuple[str, int]] = {}  # canonical value id -> (server, box generation)
         self._live: dict[str, tuple[str, dict]] = {}  # kind -> (hash, view) last observed
+        self._operators: dict[str, Value] = {}
+        sandbox.attach(self)
 
     def _view(self, desc: ToolDescriptor) -> dict:
         if desc.server not in self.endpoints:
@@ -281,7 +323,7 @@ class ManifestRegistry:
     def approve(self, manifest: ToolManifest, desc: ToolDescriptor, overrides: Iterable[str] = ()) -> int:
         """Owner approval of a manifest against the tool as it is now. Returns the new version."""
         overrides = frozenset(overrides) & OVERRIDABLE
-        problems = [p for p in bones(manifest, desc) if p.rule not in overrides]
+        problems = [p for p in bones(manifest, desc, desc.server in self.boxes) if p.rule not in overrides]
         if problems:
             raise BonesError(problems)
         if desc.kind not in self.sb.kinds:
@@ -295,7 +337,7 @@ class ManifestRegistry:
             (desc.kind, version, json.dumps(asdict(manifest)), json.dumps(view), h, json.dumps(sorted(overrides)), now),
         )
         self.sb.invalidate_kind(desc.kind)  # anything issued under the previous version
-        self.sb.set_kind(compile_kind(manifest))
+        self.sb.set_kind(self._compile(manifest, view))
         self._live[desc.kind] = (h, view)
         self.sb.store.audit(now, "manifest.approve", tool=desc.kind, version=version, overrides=sorted(overrides))
         return version
@@ -319,7 +361,7 @@ class ManifestRegistry:
                 self.sb.invalidate_kind(kind)
             self.sb.set_kind(compile_kind(conservative(kind, view["args"])))
         else:  # unchanged, additive or tightening vs what the owner approved
-            self.sb.set_kind(compile_kind(base.manifest))
+            self.sb.set_kind(self._compile(base.manifest, view))
         if changed:
             now = self.sb.clock()
             if change.outcome != "unchanged":  # lands in the batched digest, never an interrupt
@@ -328,16 +370,141 @@ class ManifestRegistry:
                                 loosened=change.loosened, other=change.other)
         return change
 
-    def check_call(self, kind: str, args: Iterable[str]) -> str | None:
-        """Partial validity: a call may only use args the owner approved (or, while the tool is
-        reverted to approval-per-call, args the server currently declares)."""
+    @staticmethod
+    def _compile(m: ToolManifest, view: dict) -> KindSpec:
+        """A destination that is a list of paths or addresses is never grant-covered: approval only."""
+        spec = compile_kind(m)
+        if any(r == "destination" and "array" in _types(view["args"].get(a, {})) for a, r in m.args.items()):
+            spec = replace(spec, grantable=False)
+        return spec
+
+    def _many(self, kind: str, arg: str) -> bool:
+        """Whether the server takes this arg as a list, per the schema calls are bound against."""
+        live, base = self._live.get(kind), self.approved(kind)
+        view = live[1] if live else base.view if base else {"args": {}}
+        schema = view["args"].get(arg)
+        return isinstance(schema, Mapping) and "array" in _types(schema)
+
+    def roles(self, kind: str) -> dict[str, str] | None:
+        """Arg roles calls are bound by now. Partial validity: only args the owner approved, or,
+        while the tool is reverted to approval-per-call, the server's current args as payload."""
         base, live = self.approved(kind), self._live.get(kind)
         if base is None and live is None:
-            return f"unknown tool {kind!r}"
+            return None
         reverted = base is None or (live is not None and diff(base.view, live[1], base.manifest.args).loosened)
-        allowed = set(live[1]["args"]) if reverted and live else set(base.view["args"])  # type: ignore[union-attr]
-        unknown = sorted(set(args) - allowed)
+        if reverted and live:
+            return dict(conservative(kind, live[1]["args"]).args)
+        return {a: base.manifest.args[a] for a in base.view["args"]}  # type: ignore[union-attr]
+
+    def check_call(self, kind: str, args: Iterable[str]) -> str | None:
+        roles = self.roles(kind)
+        if roles is None:
+            return f"unknown tool {kind!r}"
+        unknown = sorted(set(args) - set(roles))
         return f"args not approved: {unknown}" if unknown else None
+
+    def manages(self, kind: str) -> bool:
+        server, sep, _ = kind.partition("/")
+        return bool(sep) and server in self.endpoints
+
+    def operator(self, server: str) -> Value:
+        """The destination of a call with no destination arg: the server's owner-configured operator."""
+        if server not in self._operators:
+            self._operators[server] = self.sb.store.put(f"mcp:{server}", OWNER_PUBLIC, "owner:config", self.sb.clock())
+        return self._operators[server]
+
+    def bind(self, kind: str, args: Mapping[str, Value]) -> Egress | str:
+        """Named call args -> an egress with each value in its role's position, or why not."""
+        if not self.manages(kind):
+            return f"{kind!r} is not a tool of an owner-configured server"
+        why = self.check_call(kind, args)
+        if why:
+            return why
+        roles = self.roles(kind) or {}
+        server = kind.partition("/")[0]
+        if server in self.boxes:
+            try:
+                args = {a: self._canonical(kind, a, v) if roles[a] == "destination" else v for a, v in args.items()}
+            except ValueError as exc:
+                return f"path rejected: {exc}"
+        by_role = {r: sorted(a for a in args if roles[a] == r) for r in ("destination", "payload", "control")}
+        dests = by_role["destination"]
+        # CEILING: one destination per egress; extra destination args ride as payload (approval-only kind)
+        dest_name, payload = (dests[0], dests[1:] + by_role["payload"]) if dests else ("", by_role["payload"])
+        dest = args[dest_name] if dest_name else self.operator(server)
+        return Egress(kind, dest, tuple(args[a] for a in payload), tuple(args[a] for a in by_role["control"]),
+                      (dest_name, *payload, *by_role["control"]))
+
+    def check_egress(self, eg: Egress) -> str | None:
+        """The door's re-check: every position holds an approved arg of the matching role, so a
+        binding bug cannot pass a destination off as payload under an operator grant."""
+        if not self.manages(eg.kind):
+            return "named args on a tool no server owns" if eg.names else None
+        roles = self.roles(eg.kind)
+        if roles is None or not eg.names:
+            return "tool call without approved, named args"
+        dest = eg.names[0]
+        expected = [{"payload", "destination"} if dest else {"payload"}] * len(eg.payload) + [{"control"}] * len(eg.control)
+        if (dest and roles.get(dest) != "destination") or any(
+                roles.get(n) not in ok for n, ok in zip(eg.names[1:], expected)):
+            return "call args are not in their approved roles"
+        if not dest and eg.destination.data != f"mcp:{eg.kind.partition('/')[0]}":
+            return "call with no destination arg must go to its operator"
+        return self._check_paths(eg, roles)
+
+    # ---- box paths: canonical at bind, canonical again at dispatch ----
+
+    def _resolve(self, server: str, data: str, many: bool) -> str:
+        """A path, or for a list-typed arg a JSON list of paths (each checked; any reject rejects
+        the whole call). The schema decides which, so what is checked is what the server gets."""
+        box = self.boxes[server]
+        if not many:
+            return box.resolve(data)
+        paths = json.loads(data)
+        if not isinstance(paths, list) or not paths or not all(isinstance(p, str) for p in paths):
+            raise ValueError("a path list must be a non-empty JSON list of strings")
+        return json.dumps([box.resolve(p) for p in paths])
+
+    def _canonical(self, kind: str, arg: str, v: Value) -> Value:
+        """The checked path is the sent path: a new value holding the canonical form, same label."""
+        server = kind.partition("/")[0]
+        canon = self._resolve(server, v.data, self._many(kind, arg))
+        out = self.sb.store.put(canon, v.label, f"canonical:{server}", self.sb.clock())
+        self._minted[out.id] = (server, self.boxes[server].generation)
+        return out
+
+    def _check_paths(self, eg: Egress, roles: Mapping[str, str]) -> str | None:
+        server = eg.kind.partition("/")[0]
+        box = self.boxes.get(server)
+        if box is None:
+            return None
+        for name, v in zip(eg.names, (eg.destination, *eg.payload, *eg.control)):
+            if not name or roles.get(name) != "destination":
+                continue
+            if self._minted.get(v.id) != (server, box.generation):  # a restarted box fails closed
+                return "path was not canonicalised in the running box"
+            try:
+                again = self._resolve(server, v.data, self._many(eg.kind, name))
+            except ValueError as exc:
+                return f"path rejected at dispatch: {exc}"
+            if again != v.data:
+                return f"{PATH_MOVED}: {v.data} now resolves to {again}"
+        return None
+
+    def rebind(self, eg: Egress) -> Egress | str:
+        """The same call bound afresh: a moved path becomes a new call for the owner, never the old approval."""
+        values = (eg.destination, *eg.payload, *eg.control)
+        return self.bind(eg.kind, {n: v for n, v in zip(eg.names, values) if n})
+
+    def catalog(self) -> dict[str, dict]:
+        """What the planner may read: frozen owner-approved manifests only, never live descriptions."""
+        rows = self.sb.store.db.execute(
+            "SELECT tool, manifest FROM manifests m WHERE version=(SELECT MAX(version) FROM manifests WHERE tool=m.tool)")
+        out = {}
+        for tool, blob in rows:
+            m = json.loads(blob)
+            out[tool] = {"effect": m["effect"], "args": m["args"]}
+        return out
 
     def change_counts(self) -> dict[str, int]:
         """Manifest changes per server so far: a churny server shows up here, not as interrupts."""
