@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import threading
 from contextlib import contextmanager
 from typing import Iterator
 
@@ -80,21 +81,59 @@ def egress_from_blob(store: "Store", blob: str) -> Egress | None:
     return Egress(e["kind"], dest, payload, control, tuple(e.get("names", ())))  # type: ignore[arg-type]
 
 
+class _Result:
+    """A statement's complete result, fetched under the lock."""
+
+    def __init__(self, cur: sqlite3.Cursor) -> None:
+        self._rows, self.rowcount, self.lastrowid = iter(cur.fetchall()), cur.rowcount, cur.lastrowid
+
+    def fetchone(self) -> tuple | None:  # consumes, like a cursor
+        return next(self._rows, None)
+
+    def fetchall(self) -> list[tuple]:
+        return list(self._rows)
+
+    def __iter__(self) -> Iterator[tuple]:
+        return self._rows
+
+
+class _LockedDB:
+    """One connection shared by threads (the door's proxy runs beside the owner's loop): each
+    statement runs whole under the lock, and a transaction holds it from BEGIN to COMMIT."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn, self.lock = conn, threading.RLock()
+
+    def execute(self, sql: str, params: object = ()) -> _Result:
+        with self.lock:
+            return _Result(self._conn.execute(sql, params))  # type: ignore[arg-type]
+
+    def executemany(self, sql: str, seq: object) -> _Result:
+        with self.lock:
+            return _Result(self._conn.executemany(sql, seq))  # type: ignore[arg-type]
+
+    def executescript(self, sql: str) -> None:
+        with self.lock:
+            self._conn.executescript(sql)
+
+
 class Store:
     def __init__(self, path: str = ":memory:") -> None:
-        self.db = sqlite3.connect(path, isolation_level=None)  # explicit transactions only
+        # explicit transactions only
+        self.db = _LockedDB(sqlite3.connect(path, isolation_level=None, check_same_thread=False))
         self.db.executescript(_SCHEMA)
 
     @contextmanager
-    def tx(self) -> Iterator[sqlite3.Connection]:
+    def tx(self) -> Iterator[_LockedDB]:
         """Atomic section: BEGIN IMMEDIATE takes the write lock before any read."""
-        self.db.execute("BEGIN IMMEDIATE")
-        try:
-            yield self.db
-        except BaseException:
-            self.db.execute("ROLLBACK")
-            raise
-        self.db.execute("COMMIT")
+        with self.db.lock:
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                yield self.db
+            except BaseException:
+                self.db.execute("ROLLBACK")
+                raise
+            self.db.execute("COMMIT")
 
     # values
     def put(self, data: str, label: Label, source: str, now: float) -> Value:

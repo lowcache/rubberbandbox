@@ -17,6 +17,9 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Iterator, Mapping
 
+PROXY_PORT = 3128
+PROXY_ENV = {k: f"http://127.0.0.1:{PROXY_PORT}" for k in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy",
+                                                       "ALL_PROXY", "all_proxy")} | {"NODE_USE_ENV_PROXY": "1"}
 MAX_LINKS = 40
 MAX_PATH = 4096
 _RESERVED = ("/nix", "/proc", "/dev", "/tmp")
@@ -51,6 +54,7 @@ class Box:
     ro_paths: tuple[str, ...] = ()  # extra read-only host paths, bound at the same path
     sockets: Mapping[str, str] = field(default_factory=dict)  # box path -> host unix socket
     stage: str = ""  # host dir for overlay upper/work dirs; required when folders are given
+    network: bool = False  # True: the door's CONNECT proxy is the one route out (grant per target)
 
     def __post_init__(self) -> None:
         # host paths are pinned by realpath: identity names the real target, launch re-checks it
@@ -90,7 +94,7 @@ class Box:
     def identity(self) -> dict:
         """What the box exposes; part of the operator's identity (the stage dir is not)."""
         return {"folders": dict(sorted(self.folders.items())), "ro_paths": sorted(self.ro_paths),
-                "sockets": dict(sorted(self.sockets.items()))}
+                "sockets": dict(sorted(self.sockets.items())), "network": self.network}
 
     def layer(self, box_path: str) -> tuple[str, str]:
         d = os.path.join(self.stage, hashlib.sha256(box_path.encode()).hexdigest()[:16])
@@ -118,7 +122,10 @@ def closure(paths: list[str]) -> list[str]:
     return found
 
 
-def launch_args(command: tuple[str, ...], env: Mapping[str, str], cwd: str, box: Box, info_fd: int) -> list[str]:
+def launch_args(command: tuple[str, ...], env: Mapping[str, str], cwd: str, box: Box, info_fd: int,
+                block_fd: int | None = None) -> list[str]:
+    """bwrap arguments. `block_fd`: the command waits until it is readable (the proxy listener is
+    placed in between)."""
     box.check_host()
     exe = os.path.realpath(command[0])
     if _store_root(exe) is None:
@@ -128,7 +135,10 @@ def launch_args(command: tuple[str, ...], env: Mapping[str, str], cwd: str, box:
         raise BoxError("bubblewrap is not installed")
     args = [bwrap, "--info-fd", str(info_fd), "--unshare-all", "--unshare-user", "--disable-userns",
             "--die-with-parent", "--new-session", "--clearenv"]
-    for k, v in sorted(env.items()):
+    if block_fd is not None:
+        args += ["--block-fd", str(block_fd)]
+    proxy_env = PROXY_ENV if box.network else {}
+    for k, v in sorted({**env, **proxy_env}.items()):  # the owner cannot point traffic elsewhere
         args += ["--setenv", k, v]
     bound = closure([exe, *box.ro_paths])
     for p in bound:

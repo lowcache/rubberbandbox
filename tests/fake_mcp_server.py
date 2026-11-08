@@ -9,6 +9,7 @@ import sys
 import time
 
 MODE = sys.argv[1] if len(sys.argv) > 1 else "normal"
+HELD = []
 TEXT = {"type": "object", "properties": {"text": {"type": "string"}, "count": {"type": "integer"}}, "required": ["text"]}
 EMPTY = {"type": "object", "properties": {}}
 WRITE = {"type": "object", "properties": {"path": {"type": "string"}, "text": {"type": "string"}}}
@@ -28,6 +29,8 @@ TOOLS = [
     {"name": "link", "inputSchema": LINK, "annotations": {"destructiveHint": False, "openWorldHint": False}},
     {"name": "rm", "inputSchema": WRITE, "annotations": {"openWorldHint": False}},
     {"name": "find", "inputSchema": WRITE, "annotations": LOCAL},
+    {"name": "via_proxy", "inputSchema": WRITE, "annotations": LOCAL},
+    {"name": "hold_tunnel", "inputSchema": WRITE, "annotations": LOCAL},
 ]
 
 
@@ -80,6 +83,26 @@ def call(rid, name, args):
     elif name == "link":
         os.symlink(args["target"], args["path"])
         reply(rid, text("ok"))
+    elif name == "via_proxy":  # path = raw request head (or a CONNECT target), text = bytes to send after
+        head = args["path"] if " " in args["path"] else f"CONNECT {args['path']} HTTP/1.1\r\nHost: {args['path']}\r\n\r\n"
+        try:
+            s = socket.create_connection(("127.0.0.1", 3128), timeout=5)
+        except OSError as exc:
+            return reply(rid, text(json.dumps({"error": errno.errorcode.get(exc.errno, str(exc))})))
+        s.sendall(head.encode())
+        status = s.recv(4096).split(b"\r\n", 1)[0].decode()
+        echoed = ""
+        if " 200 " in status and args.get("text"):
+            s.sendall(args["text"].encode())
+            echoed = s.recv(4096).decode()
+        reply(rid, text(json.dumps({"status": status, "echo": echoed, "env": os.environ.get("HTTPS_PROXY")})))
+    elif name == "hold_tunnel":  # open a tunnel, use it once, keep it open
+        s = socket.create_connection(("127.0.0.1", 3128), timeout=5)
+        s.sendall(f"CONNECT {args['path']} HTTP/1.1\r\n\r\n".encode())
+        s.recv(4096)
+        s.sendall(b"one")
+        HELD.append(s)
+        reply(rid, text(s.recv(100).decode()))
     elif name == "find":
         reply(rid, text(json.dumps(sorted(os.path.join(r, f) for r, _, fs in os.walk(args["path"]) for f in fs))))
     elif name == "rm":

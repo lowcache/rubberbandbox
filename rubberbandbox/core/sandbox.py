@@ -114,6 +114,7 @@ class Sandbox:
         self.workspace: list[Value] = []
         self.stiffened: set[str] = set()
         self.registry: ManifestRegistry | None = None
+        self.revoked = 0  # bumped by every revocation; live tunnels re-check when it moves
 
     def attach(self, registry: ManifestRegistry) -> None:
         """The registry binds named tool calls; the door re-checks every one against it."""
@@ -138,6 +139,7 @@ class Sandbox:
 
     def owner_end(self, grant: Grant) -> None:
         self.grants.end(grant.id, self.clock())
+        self.revoked += 1
 
     def owner_approve(self, aid: str) -> Outcome:
         now = self.clock()
@@ -161,10 +163,38 @@ class Sandbox:
     def stiffen(self, cluster: str) -> None:
         """Tighten private work for a cluster. Never touches the public lane."""
         self.stiffened.add(cluster)
+        self.revoked += 1
         self.store.audit(self.clock(), "stiffen", cluster=cluster)
 
     def tick(self) -> list[tuple[str, str]]:
         return self._door.tick()
+
+    def connect(self, kind: str, target: str) -> Outcome:
+        """One outbound connection a box asked for (its proxy): egress to `target`, by grant only.
+        A refusal lands in the digest as a notice, never an interrupt: the owner may mint a grant."""
+        now = self.clock()
+        spec, owner = self.kinds.get(kind), self._kind_owner.get(kind)
+        if spec is None or owner is None:
+            return Outcome(kind, target, "refused", "unknown kind")
+        dest = self.store.put(target, EXTERNAL_PRIVATE, f"{kind}:request", now)  # chosen inside the box
+        cluster = self._cluster(target, owner)
+        grant = self.grants.find(kind, target, now) if spec.grantable and cluster not in self.stiffened else None
+        if grant is None:
+            self.approvals.notice("net.refused", cluster, dest.id, now)
+            self.store.audit(now, "net.refused", kind=kind, dest=dest.id, target=target)
+            return Outcome(kind, target, "refused", "no grant covers this target")
+        return Outcome(kind, target, *self._door.cross(Egress(kind, dest, ()), Authorization("grant", grant.id)))
+
+    def still_allowed(self, kind: str, target: str) -> bool:
+        """Would a connection to `target` be authorized right now? Live tunnels ask this; it dials nothing."""
+        now = self.clock()
+        spec, owner = self.kinds.get(kind), self._kind_owner.get(kind)
+        if spec is None or owner is None or not spec.grantable or self._cluster(target, owner) in self.stiffened:
+            return False
+        if self.grants.find(kind, target, now) is None:
+            return False
+        probe = Egress(kind, Value("V0", target, EXTERNAL_PRIVATE, f"{kind}:recheck", now), ())  # never stored
+        return self._door.calls is None or self._door.calls(probe) is None
 
     # ---- manifest changes (driven by the registry) ----
 
@@ -189,6 +219,7 @@ class Sandbox:
             db.executemany("UPDATE approvals SET status='invalidated' WHERE id=?", [(i,) for i in approvals])
             db.executemany("UPDATE scheduled SET status='invalidated' WHERE id=?", [(i,) for i in scheduled])
             receipts = db.execute("UPDATE receipts SET consumed=1 WHERE kind=? AND consumed=0", (kind,)).rowcount
+        self.revoked += 1
         self.store.audit(now, "kind.invalidated", kind=kind, grants=len(grants), approvals=len(approvals),
                          scheduled=len(scheduled), receipts=receipts)
 

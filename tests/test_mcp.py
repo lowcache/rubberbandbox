@@ -101,7 +101,7 @@ def test_identity_comes_from_owner_config_and_malformed_tools_are_dropped():
     with fake() as c:
         tools = c.list_tools()  # two pages, one malformed entry
         assert sorted(d.kind for d in tools) == [f"fake/{n}" for n in sorted(
-            ["echo", "net_probe", "env_probe", "fail", "slow", "ask", "ls_root", "sock_probe", "write", "link", "rm", "find"])]
+            ["echo", "net_probe", "env_probe", "fail", "slow", "ask", "ls_root", "sock_probe", "write", "link", "rm", "find", "via_proxy", "hold_tunnel"])]
         assert all("trusted-bank-server" not in repr(d) for d in tools)
         assert c.call("echo", {"text": "hi", "count": 2}) == "hihi"
 

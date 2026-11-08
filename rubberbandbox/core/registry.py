@@ -7,6 +7,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from types import MappingProxyType
 from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING, Iterable, Mapping, Protocol
 
@@ -187,8 +188,11 @@ def _narrowed(old: str, new: str) -> bool:
         a, b = json.loads(old.removeprefix("stdio:")), json.loads(new.removeprefix("stdio:"))
     except ValueError:
         return False
-    if not (isinstance(a, dict) and isinstance(b, dict)) or {k: v for k, v in a.items() if k not in _BOX_LISTS} != \
-            {k: v for k, v in b.items() if k not in _BOX_LISTS}:
+    rest = lambda e: _canon({k: v for k, v in e.items() if k not in (*_BOX_LISTS, "network")})
+    if not (isinstance(a, dict) and isinstance(b, dict)) or rest(a) != rest(b):
+        return False
+    na, nb = a.get("network", False), b.get("network", False)
+    if not (isinstance(na, bool) and isinstance(nb, bool)) or (nb and not na):  # gaining the proxy widens
         return False
     for k in _BOX_LISTS:
         x, y = a.get(k, []), b.get(k, [])
@@ -196,6 +200,15 @@ def _narrowed(old: str, new: str) -> bool:
         if type(x) is not type(y) or not pairs(y) <= pairs(x):
             return False
     return True
+
+
+def _network(endpoint: str) -> bool:
+    """Whether an endpoint enables the door's proxy route; anything unreadable means no."""
+    try:
+        e = json.loads(endpoint.removeprefix("stdio:"))
+    except ValueError:
+        return False
+    return isinstance(e, dict) and e.get("network") is True
 
 
 def diff(old: dict, new: dict, roles: Mapping[str, str]) -> Change:
@@ -300,7 +313,8 @@ class ManifestRegistry:
 
     def __init__(self, sandbox: Sandbox, endpoints: Mapping[str, str], boxes: Mapping[str, Resolver] = {}) -> None:
         self.sb = sandbox
-        self.endpoints = dict(endpoints)
+        self._endpoints = dict(endpoints)
+        self.endpoints = MappingProxyType(self._endpoints)  # read-only: changes go through configure()
         self.boxes = dict(boxes)  # server -> its box; destination args there are box paths
         if set(self.boxes) - set(self.endpoints):  # an unconfigured box would escape every box rule
             raise ValueError(f"boxed servers not configured by the owner: {sorted(set(self.boxes) - set(self.endpoints))}")
@@ -308,6 +322,27 @@ class ManifestRegistry:
         self._live: dict[str, tuple[str, dict]] = {}  # kind -> (hash, view) last observed
         self._operators: dict[str, Value] = {}
         sandbox.attach(self)
+
+    def configure(self, server: str, endpoint: str) -> None:
+        """The owner (re)configures a server. Any change but a narrowing is a new operator: every grant,
+        approval and receipt for its tools and its network route ends now, which also cuts live
+        tunnels; its tools stay reverted until the owner re-approves them."""
+        old = self._endpoints.get(server)
+        self._endpoints[server] = endpoint
+        if old is None or old == endpoint:
+            return
+        if _narrowed(old, endpoint):
+            if _network(old) and not _network(endpoint):  # a narrowing, but the route is gone now
+                self.sb.invalidate_kind(f"net:{server}")
+            return
+        tools = [k for k in self.sb.kinds if k.partition("/")[0] == server]
+        for kind in tools + [f"net:{server}"]:
+            self.sb.invalidate_kind(kind)
+        for kind in tools:  # semantics revert now, not at the next observe (no public_read meanwhile)
+            live, base = self._live.get(kind), self.approved(kind)
+            args = live[1]["args"] if live else base.view["args"] if base else {}
+            self.sb.set_kind(compile_kind(conservative(kind, args)))
+        self.sb.store.audit(self.sb.clock(), "server.reconfigured", server=server)
 
     def _view(self, desc: ToolDescriptor) -> dict:
         if desc.server not in self.endpoints:
@@ -361,6 +396,8 @@ class ManifestRegistry:
         if change.outcome == "loosened":
             if changed:  # each new loosened version kills what was authorized before it
                 self.sb.invalidate_kind(kind)
+                if "endpoint changed" in change.loosened:  # a new operator: its network route too
+                    self.sb.invalidate_kind(f"net:{desc.server}")
             self.sb.set_kind(compile_kind(conservative(kind, view["args"])))
         else:  # unchanged, additive or tightening vs what the owner approved
             self.sb.set_kind(self._compile(base.manifest, view))
@@ -400,7 +437,12 @@ class ManifestRegistry:
     def _reverted(self, kind: str) -> bool:
         """No owner-approved manifest, or the live tool loosened past it."""
         base, live = self.approved(kind), self._live.get(kind)
-        return base is None or (live is not None and bool(diff(base.view, live[1], base.manifest.args).loosened))
+        if base is None:
+            return True
+        now = self._endpoints.get(kind.partition("/")[0])  # reconfigured but not yet observed
+        if now != base.view["endpoint"] and not (now is not None and _narrowed(base.view["endpoint"], now)):
+            return True
+        return live is not None and bool(diff(base.view, live[1], base.manifest.args).loosened)
 
     def _unreviewed_in_box(self, kind: str) -> str | None:
         """In a box, roles decide which args are canonicalised paths; without reviewed roles a raw
@@ -451,9 +493,29 @@ class ManifestRegistry:
         return Egress(kind, dest, tuple(args[a] for a in payload), tuple(args[a] for a in by_role["control"]),
                       (dest_name, *payload, *by_role["control"]))
 
+    def net_check(self, server: str) -> str | None:
+        """A server's network route is open only while the owner has reviewed it as currently
+        launched: at least one approved tool, and every approved tool's endpoint equal to (or
+        wider than) today's configuration."""
+        current = self.endpoints.get(server)
+        if current is None:
+            return f"network for unconfigured server {server!r}"
+        if not _network(current):
+            return f"{server} is not configured for network"
+        rows = self.sb.store.db.execute(
+            "SELECT tool, view FROM manifests m WHERE version=(SELECT MAX(version) FROM manifests WHERE tool=m.tool)")
+        endpoints = [json.loads(v)["endpoint"] for t, v in rows if t.partition("/")[0] == server]
+        if not endpoints:
+            return f"{server} has no reviewed tool: its network stays closed"
+        if any(e != current and not _narrowed(e, current) for e in endpoints):
+            return f"{server}'s launch changed since review: re-approve before it gets network"
+        return None
+
     def check_egress(self, eg: Egress) -> str | None:
         """The door's re-check: every position holds an approved arg of the matching role, so a
         binding bug cannot pass a destination off as payload under an operator grant."""
+        if eg.kind.startswith("net:"):
+            return self.net_check(eg.kind[4:])
         if not self.manages(eg.kind):
             return "named args on a tool no server owns" if eg.names else None
         blocked = self._unreviewed_in_box(eg.kind)

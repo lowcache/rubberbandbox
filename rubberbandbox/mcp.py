@@ -2,7 +2,8 @@
 door-side adapter. Every call is egress to the server's operator.
 
 Server identity comes from owner config (name, launch command, box), never from serverInfo. A
-local server runs in an allowlist box (see box.py): no network, no host env, staged writes."""
+local server runs in an allowlist box (see box.py): no host env, staged writes, and no network
+unless the owner enables the door's CONNECT proxy for it (see proxy.py)."""
 
 from __future__ import annotations
 
@@ -17,8 +18,10 @@ from dataclasses import dataclass, field
 from typing import Iterable, Mapping, Sequence
 
 from . import box as boxes
+from . import proxy
 from .box import Box, PathRejected
-from .core import ManifestPack, Mount, Rules, ToolAdapter, ToolDescriptor, conservative, generated_schema, prefix_cluster
+from .core import (ManifestPack, Mount, Rules, ToolAdapter, ToolDescriptor, ToolManifest, conservative,
+                   generated_schema, prefix_cluster)
 
 PROTOCOL = "2025-06-18"
 SUPPORTED = frozenset({"2025-06-18", "2025-03-26", "2024-11-05"})
@@ -33,7 +36,7 @@ class McpError(RuntimeError):
 @dataclass(frozen=True)
 class ServerConfig:
     """Owner config for one local server. The server gets only `env`, never the owner's environment.
-    `cwd` is a path inside the box. CEILING: no network exception yet (the door CONNECT proxy)."""
+    `cwd` is a path inside the box."""
 
     name: str
     command: tuple[str, ...]
@@ -46,7 +49,7 @@ class ServerConfig:
     def endpoint(self) -> str:
         """Hashed into every tool's security view: a changed launch or a wider box is a loosening."""
         return "stdio:" + json.dumps({"command": list(self.command), "env": dict(sorted(self.env.items())),
-                                      "cwd": self.cwd, "network": False, **self.box.identity()})
+                                      "cwd": self.cwd, **self.box.identity()})
 
 
 class McpClient:
@@ -59,6 +62,10 @@ class McpClient:
         self._ids = itertools.count(1)
         self._lock = threading.Lock()
         self._proc: subprocess.Popen | None = None
+        self._listener = None
+        self.net = proxy.NetAdapter()  # the door's adapter for this server's `net:` kind
+        self._slots = threading.BoundedSemaphore(proxy.MAX_CONNECTIONS)  # one budget for every launch
+        self._gate: proxy.Gate | None = None  # set by wire(); until then every CONNECT is refused
         self._launch()
 
     def _launch(self) -> None:
@@ -66,19 +73,33 @@ class McpClient:
         self._inbox: queue.Queue[dict | Exception] = queue.Queue()
         r, w = os.pipe()
         try:
-            args = boxes.launch_args(self.cfg.command, self.cfg.env, self.cfg.cwd, self.cfg.box, w)
-            self._proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                          stderr=subprocess.DEVNULL, pass_fds=(w,), env={})
-            os.close(w)
-            w = -1
-            self.pid = boxes.info_pid(r)
-        except BaseException:
-            if w >= 0:
-                os.close(w)
+            br, bw = os.pipe()  # the server waits on this until the proxy listener is in place
+        except OSError:
             os.close(r)
+            os.close(w)
+            raise
+        try:
+            args = boxes.launch_args(self.cfg.command, self.cfg.env, self.cfg.cwd, self.cfg.box, w, br)
+            self._proc = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                          stderr=subprocess.DEVNULL, pass_fds=(w, br), env={})
+            os.close(w)
+            os.close(br)
+            w = br = -1
+            self.pid = boxes.info_pid(r)
+            if self.cfg.box.network:
+                self._listener = proxy.listen_in(self.pid)
+                proxy.serve(self._listener, lambda: self._gate, self._net_closed, self._slots)
+            os.write(bw, b"go")
+        except BaseException:
+            for fd in (w, br):
+                if fd >= 0:
+                    os.close(fd)
+            os.close(r)
+            os.close(bw)
             self.close()
             raise
         os.close(r)
+        os.close(bw)
         threading.Thread(target=self._read, args=(self._proc, self._inbox), daemon=True).start()
         try:
             self._handshake()
@@ -179,7 +200,21 @@ class McpClient:
             raise McpError(f"tool error: {text[:500]}")
         return text
 
+    def wire(self, sandbox: object) -> None:
+        """Connect this server's proxy to the sandbox's door (after the sandbox is built)."""
+        self._sandbox = sandbox
+        self._gate = proxy.gate(sandbox, f"net:{self.cfg.name}", self.net)
+
+    def _net_closed(self, dest: str, up: int, down: int, cut: bool) -> None:
+        sb = getattr(self, "_sandbox", None)
+        if sb is not None:
+            sb.store.audit(sb.clock(), "net.cut" if cut else "net.closed", kind=f"net:{self.cfg.name}",
+                           target=dest, up=up, down=down)
+
     def close(self) -> None:
+        listener, self._listener = self._listener, None
+        if listener is not None:
+            listener.close()
         proc, self._proc = self._proc, None
         if proc is None:
             return
@@ -264,10 +299,14 @@ def mount(client: McpClient) -> tuple[Mount, dict[str, ToolAdapter], list[ToolDe
     until the owner approves a manifest. CEILING: tools added later are not mounted until restart."""
     tools = client.list_tools()
     name = client.cfg.name
-    pack = ManifestPack(name, generated_schema(name, ()), [conservative(d.kind, _args(d)) for d in tools],
-                        (), Rules(), prefix_cluster("mcp"))
+    manifests = [conservative(d.kind, _args(d)) for d in tools]
     adapter = McpAdapter(client, tools)
-    return Mount(pack, None), {d.kind: adapter for d in tools}, tools
+    adapters: dict[str, ToolAdapter] = {d.kind: adapter for d in tools}
+    if client.cfg.box.network:  # each proxied connection: a grant-only egress to `host:port`
+        manifests.append(ToolManifest(f"net:{name}", "send", {"target": "destination"}))
+        adapters[f"net:{name}"] = client.net  # type: ignore[assignment]
+    pack = ManifestPack(name, generated_schema(name, ()), manifests, (), Rules(), prefix_cluster("mcp"))
+    return Mount(pack, None), adapters, tools
 
 
 def _args(d: ToolDescriptor) -> list[str]:

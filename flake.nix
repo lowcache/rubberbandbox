@@ -12,6 +12,7 @@
           packages = [
             (pkgs.python3.withPackages (ps: [ ps.pytest ps.hypothesis ps.anthropic ]))
             pkgs.bubblewrap # the box launcher for local MCP servers
+            pkgs.util-linux # nsenter: places the door proxy listener inside a box
             pkgs.mcp-server-filesystem # official MCP filesystem server, boxed in tests
           ];
         };
