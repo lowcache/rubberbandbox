@@ -12,7 +12,7 @@ import threading
 import pytest
 
 from rubberbandbox import mcp
-from rubberbandbox.box import Box, BoxError, PathRejected, commit, launch_args, staged
+from rubberbandbox.box import Box, BoxError, PathRejected, commit, launch_args, review, staged
 from rubberbandbox.core import (EnumField, Grant, ManifestPack, ManualClock, Mount, Rules, Sandbox, Schema,
                                 ToolDescriptor, ToolManifest, diff, security_view)
 from rubberbandbox.core.grants import covers
@@ -186,7 +186,7 @@ def test_commit_applies_writes_deletes_and_replaced_dirs_but_never_symlinks(fold
         changes = {(s.path, s.action) for s in c.staged()}
         assert {("/data/old.txt", "delete"), ("/data/docs", "replace-dir"), ("/data/evil", "skip")} <= changes
         assert (host / "old.txt").exists() and (host / "docs" / "keep.txt").exists()  # nothing yet
-        c.commit()
+        c.commit(c.review().digest)
         assert c.staged() == [] and c.call("ls_root", {})  # restarted and still serving
     assert (host / "new.txt").read_text() == "new" and not (host / "old.txt").exists()
     assert sorted(os.listdir(host / "docs")) == ["fresh.txt"]  # the whole dir was replaced
@@ -205,7 +205,7 @@ def test_commit_replaces_a_host_link_instead_of_writing_through_it(tmp_path):
     with open(os.path.join(upper, "victim"), "w") as f:
         f.write("from the box")
     assert [(s.path, s.action) for s in staged(b)] == [("/data/victim", "write")]
-    commit(b)
+    commit(b, review(b).digest)
     assert outside.read_text() == "precious"
     assert not (host / "victim").is_symlink() and (host / "victim").read_text() == "from the box"
 
@@ -266,7 +266,7 @@ def test_host_folders_are_pinned_and_commit_never_follows_a_link_at_any_depth(tm
     with pytest.raises(BoxError):
         b.check_host()
     with pytest.raises(BoxError, match="link-free"):
-        commit(b)
+        commit(b, review(b).digest)
     assert os.listdir(tmp_path / "elsewhere" / "data") == []
 
 
@@ -280,6 +280,73 @@ def test_commit_never_clobbers_an_unstaged_host_file(tmp_path):
     os.makedirs(work)
     with open(os.path.join(upper, "report"), "w") as f:
         f.write("new")
-    commit(b)
+    commit(b, review(b).digest)
     assert (host / ".rbb-commit-report").read_text() == "mine" and (host / "report").read_text() == "new"
     assert sorted(os.listdir(host)) == [".rbb-commit-report", "report"]  # no temp left behind
+
+
+
+# ---- no blind commit: the owner commits exactly what was reviewed ----
+
+
+def test_a_review_shows_every_change_with_its_diff(folder):
+    host, _ = folder
+    with boxed(folder) as c:
+        c.call("write", {"path": "/data/old.txt", "text": "new"})
+        c.call("write", {"path": "/data/fresh.txt", "text": "hello"})
+        c.call("rm", {"path": "/data/docs"})
+        c.call("link", {"path": "/data/evil", "target": "/etc/passwd"})
+        r = c.review()
+        by = {x.path: x for x in r.changes}
+        assert "-old" in by["/data/old.txt"].diff and "+new" in by["/data/old.txt"].diff
+        assert by["/data/old.txt"].host.startswith("file:") and by["/data/fresh.txt"].host == "absent"
+        assert by["/data/docs"].action == "delete" and by["/data/docs"].host.startswith("dir:")
+        assert by["/data/evil"].action == "skip" and "never committed" in r.render()
+        assert r.digest[:16] in r.render()
+
+
+def test_commit_refuses_a_stage_that_changed_after_review(folder):
+    host, _ = folder
+    with boxed(folder) as c:
+        c.call("write", {"path": "/data/a.txt", "text": "reviewed"})
+        seen = c.review().digest
+        c.call("write", {"path": "/data/b.txt", "text": "slipped in after the review"})
+        with pytest.raises(BoxError, match="changed since it was reviewed"):
+            c.commit(seen)
+        assert not (host / "a.txt").exists() and not (host / "b.txt").exists()  # nothing applied
+        r = c.review()
+        assert {x.path for x in r.changes} >= {"/data/a.txt", "/data/b.txt"}  # still staged, ready for review
+        c.commit(r.digest)
+    assert (host / "b.txt").read_text() == "slipped in after the review"
+
+
+def test_commit_refuses_when_the_host_changed_under_the_review(folder):
+    host, _ = folder
+    with boxed(folder) as c:
+        c.call("write", {"path": "/data/old.txt", "text": "box version"})
+        seen = c.review().digest
+        (host / "old.txt").write_text("the owner edited this meanwhile")
+        with pytest.raises(BoxError, match="changed since it was reviewed"):
+            c.commit(seen)
+    assert (host / "old.txt").read_text() == "the owner edited this meanwhile"
+
+
+def test_a_deleted_directory_is_pinned_by_its_whole_content(folder):
+    host, _ = folder
+    with boxed(folder) as c:
+        c.call("rm", {"path": "/data/docs"})
+        seen = c.review().digest
+        (host / "docs" / "added-later.txt").write_text("not what was reviewed")
+        with pytest.raises(BoxError, match="changed since it was reviewed"):
+            c.commit(seen)
+    assert (host / "docs" / "added-later.txt").exists()
+
+
+def test_staged_work_lands_in_the_digest(folder):
+    with boxed(folder) as c:
+        sb, reg, hands, tools = box(c)
+        c.wire(sb)
+        c.call("write", {"path": "/data/n.txt", "text": "x"})
+        c.call("write", {"path": "/data/n.txt", "text": "x"})  # same stage: no second notice
+        rows = sb.store.db.execute("SELECT cluster, topic, ref FROM notices").fetchall()
+        assert rows == [("fake/stage", "fs.staged", f"1 change(s), review {c.review().digest[:16]}")]

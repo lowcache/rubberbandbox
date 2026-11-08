@@ -9,7 +9,7 @@ the boundary a physics: it stretches for the task, retracts when the task ends, 
 rollback instead of breaking, and stiffens when something pulls wrong. Rubber inside; one steel
 door out.
 
-RubberBandBox is a doctrine (`rubberbandbox-design-spec-v0.4.md`) and a working reference
+RubberBandBox is a doctrine (`rubberbandbox-design-spec-v0.5.md`) and a working reference
 implementation. Its claim is narrow and testable: **the model can be fooled, but a fooled model
 cannot widen what leaves the box.**
 
@@ -26,7 +26,7 @@ calls, their path arguments and their network all cross the one door.
 
 | Stage | Status |
 |---|---|
-| Doctrine | spec v0.4 (holes 1, 2 and 5–8 closed); the pack wall postdates it and is not in the spec yet |
+| Doctrine | spec v0.5: the pack wall; holes 1, 2 and 5–8 closed |
 | v1 core | ✅ provenance labels, airlock, expiring scope grants, one door with an independent invariant, public lane, approval digest, append-only audit log, pack composition |
 | Pack wall | ✅ effect manifests · ✅ frozen, versioned manifests with a loosening diff · ✅ MCP stdio adapter · ✅ filesystem box · ✅ network through the door |
 | v1 packs | ✅ messaging (SMS and email) and ✅ coding, both re-expressed as manifests with the original tests unchanged |
@@ -58,7 +58,8 @@ whose price question was diluted. The corpora are small and the attacks are fixe
 **Structural evidence** (268 tests):
 - Property tests drive a *fully hostile* clerk and *fully hostile* hands, including hands spanning
   two composed packs, against oracles that don't depend on the door's own logic.
-- A mutation check breaks 106 guards one at a time; the suite catches all 106. Three times during
+- A mutation check breaks guards one at a time: 101 of 101 caught on the last full run; the 5
+  guards added for reviewed commits await their first full run. Three times during
   the build an outer check made an inner guard untestable; each time the surviving mutant exposed
   it and a direct test of the inner layer was added.
 - The box's path canonicaliser is checked against the kernel's own in-root resolution inside a
@@ -318,5 +319,5 @@ tests/                   unit, corpus, property, composition, manifests, registr
 
 ## Specs
 
-- `rubberbandbox-design-spec-v0.4.md`: current doctrine; does not yet describe the pack wall.
-- `rubber-sandbox-design-spec-v0.3.md`, `-v0.2.md` and `.pdf` (v0.1): history.
+- `rubberbandbox-design-spec-v0.5.md`: current doctrine, including the pack wall.
+- `rubberbandbox-design-spec-v0.4.md`, `rubber-sandbox-design-spec-v0.3.md`, `-v0.2.md` and `.pdf` (v0.1): history.

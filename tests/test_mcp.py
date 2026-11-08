@@ -375,5 +375,5 @@ def test_official_filesystem_server(tmp_path):
             "path": {"literal": "/data/notes/new.txt"}, "content": {"ref": content.id}}})
         assert out.status == "sent" and not (root / "notes" / "new.txt").exists()
         assert [(x.path, x.action) for x in c.staged()] == [("/data/notes", "mkdir"), ("/data/notes/new.txt", "write")]
-        c.commit()
+        c.commit(c.review().digest)
         assert (root / "notes" / "new.txt").read_text() == "draft" and c.staged() == []

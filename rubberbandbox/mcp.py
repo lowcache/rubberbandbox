@@ -19,7 +19,7 @@ from typing import Iterable, Mapping, Sequence
 
 from . import box as boxes
 from . import proxy
-from .box import Box, PathRejected
+from .box import Box, BoxError, PathRejected
 from .core import (ManifestPack, Mount, Rules, ToolAdapter, ToolDescriptor, ToolManifest, conservative,
                    generated_schema, prefix_cluster)
 
@@ -194,16 +194,34 @@ class McpClient:
         raise McpError("tools/list did not terminate")
 
     def call(self, name: str, arguments: Mapping[str, object]) -> str:
-        r = self.request("tools/call", {"name": name, "arguments": dict(arguments)})
+        try:
+            r = self.request("tools/call", {"name": name, "arguments": dict(arguments)})
+        finally:
+            self._stage_notice()
         text = _render(r)
         if r.get("isError") is True:
             raise McpError(f"tool error: {text[:500]}")
         return text
 
     def wire(self, sandbox: object) -> None:
-        """Connect this server's proxy to the sandbox's door (after the sandbox is built)."""
+        """Connect this server to the sandbox: its proxy to the door, its stage to the digest."""
         self._sandbox = sandbox
         self._gate = proxy.gate(sandbox, f"net:{self.cfg.name}", self.net)
+
+    def _stage_notice(self) -> None:
+        """Staged work never sits unseen: each new stage state lands in the batched digest."""
+        sb = getattr(self, "_sandbox", None)
+        if sb is None or not self.cfg.box.folders:
+            return
+        try:
+            r = boxes.review(self.cfg.box)
+        except (BoxError, OSError) as exc:
+            sb.approvals.notice("fs.stage_unreadable", f"{self.cfg.name}/stage", repr(exc)[:200], sb.clock())
+            return
+        if r.changes and r.digest != getattr(self, "_noticed", None):
+            self._noticed = r.digest
+            sb.approvals.notice("fs.staged", f"{self.cfg.name}/stage",
+                                f"{len(r.changes)} change(s), review {r.digest[:16]}", sb.clock())
 
     def _net_closed(self, dest: str, up: int, down: int, cut: bool) -> None:
         sb = getattr(self, "_sandbox", None)
@@ -237,11 +255,15 @@ class McpClient:
     def staged(self) -> list[boxes.Staged]:
         return boxes.staged(self.cfg.box)
 
-    def commit(self) -> list[boxes.Staged]:
-        """Stop the server, apply its staged writes to the host folders, start it again."""
+    def review(self) -> boxes.Review:
+        """The commit approval screen: every staged change with its diff, and the digest to approve."""
+        return boxes.review(self.cfg.box)
+
+    def commit(self, approved: str) -> boxes.Review:
+        """Stop the server, apply exactly the reviewed stage (`approved` = Review.digest), start it again."""
         self.close()
         try:
-            return boxes.commit(self.cfg.box)
+            return boxes.commit(self.cfg.box, approved)
         finally:
             self._launch()
 

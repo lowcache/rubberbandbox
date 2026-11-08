@@ -7,6 +7,7 @@ a minimal /dev and /proc, a private /tmp. No network, no host environment."""
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import os
@@ -21,6 +22,7 @@ PROXY_PORT = 3128
 PROXY_ENV = {k: f"http://127.0.0.1:{PROXY_PORT}" for k in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy",
                                                        "ALL_PROXY", "all_proxy")} | {"NODE_USE_ENV_PROXY": "1"}
 MAX_LINKS = 40
+MAX_DIFF = 256 << 10  # text larger than this is summarised (size and hash), never shown partially
 MAX_PATH = 4096
 _RESERVED = ("/nix", "/proc", "/dev", "/tmp")
 _WHITEOUT = (0, 0)
@@ -268,10 +270,136 @@ def staged(box: Box) -> list[Staged]:
     return out
 
 
-def commit(box: Box) -> list[Staged]:
-    """Apply staged writes to the host folders, then clear the stage. The server must be stopped.
-    Host-side links are never followed: an entry the box replaced is replaced, not written through."""
-    changes = staged(box)  # validates the whole stage before touching anything
+@dataclass(frozen=True)
+class Reviewed:
+    path: str  # box path
+    action: str  # as in Staged
+    staged: str = ""  # sha256 of the staged content (writes)
+    host: str = ""  # what the host has there now: 'file:<sha256>', 'dir:<tree sha256>', 'absent', 'other'
+    diff: str = ""  # unified diff against the host file, or a size and hash summary
+
+
+@dataclass(frozen=True)
+class Review:
+    """The commit approval: every staged change, and a digest over the staged content and the host
+    content it would replace. Commit applies exactly this, or nothing."""
+
+    changes: tuple[Reviewed, ...]
+    digest: str
+
+    def render(self) -> str:
+        out = [f"stage review {self.digest[:16]}: {len(self.changes)} change(s)"]
+        for c in self.changes:
+            note = " (never committed)" if c.action == "skip" else f" (host: {c.host.split(':')[0]})"
+            out.append(f"{c.action:<11} {c.path}{note}")
+            if c.diff:
+                out.append(c.diff.rstrip("\n"))
+        return "\n".join(out)
+
+
+def _sha(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _tree(fd: int) -> str:
+    """A hash of a host directory's whole content, read without following links."""
+    h = hashlib.sha256()
+    for name in sorted(os.listdir(fd)):
+        st = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        if stat.S_ISDIR(st.st_mode):
+            sub = os.open(name, os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+            try:
+                h.update(f"d {name} {_tree(sub)}\n".encode())
+            finally:
+                os.close(sub)
+        elif stat.S_ISREG(st.st_mode):
+            h.update(f"f {name} {_sha(_read(name, fd))}\n".encode())
+        else:
+            h.update(f"o {name} {st.st_mode}\n".encode())
+    return h.hexdigest()
+
+
+def _read(name: str, dir_fd: int) -> bytes:
+    with os.fdopen(os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=dir_fd), "rb") as f:
+        return f.read()
+
+
+def _host(box: Box, path: str, tree: bool) -> tuple[str, bytes | None]:
+    """The host side of a staged path, walked without following links: (state, file bytes)."""
+    dest = next(d for d in box.folders if path == d or path.startswith(d + "/"))
+    rel = [c for c in path[len(dest):].split("/") if c]
+    try:
+        fd = _open_nofollow(box.folders[dest])
+    except BoxError:
+        return "other", None
+    try:
+        for c in rel[:-1]:
+            nxt = os.open(c, os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+            os.close(fd)
+            fd = nxt
+        st = os.fstat(fd) if not rel else _lstat(rel[-1], fd)
+        if st is None:
+            return "absent", None
+        if stat.S_ISREG(st.st_mode):
+            data = _read(rel[-1], fd)
+            return f"file:{_sha(data)}", data
+        if not stat.S_ISDIR(st.st_mode):
+            return "other", None
+        if not tree:
+            return "dir", None
+        sub = os.open(rel[-1], os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd) if rel else os.dup(fd)
+        try:
+            return f"dir:{_tree(sub)}", None
+        finally:
+            os.close(sub)
+    except FileNotFoundError:
+        return "absent", None
+    except OSError:
+        return "other", None
+    finally:
+        os.close(fd)
+
+
+def _diff(path: str, old: bytes | None, new: bytes) -> str:
+    def text(b: bytes) -> str | None:
+        try:
+            return b.decode("utf-8") if len(b) <= MAX_DIFF else None
+        except UnicodeDecodeError:
+            return None
+
+    o, n = text(old or b""), text(new)
+    if o is None or n is None:
+        return f"binary or large: {len(old or b'')} -> {len(new)} bytes, staged sha256 {_sha(new)[:16]}"
+    return "".join(difflib.unified_diff(o.splitlines(True), n.splitlines(True), f"host:{path}", f"staged:{path}"))
+
+
+def review(box: Box) -> Review:
+    """What a commit would do, shown in full. Validates the stage like staged()."""
+    out: list[Reviewed] = []
+    for ch in staged(box):
+        if ch.action == "skip":
+            out.append(Reviewed(ch.path, "skip"))
+            continue
+        host, old = _host(box, ch.path, tree=ch.action in ("delete", "replace-dir"))
+        if ch.action == "write":
+            dest = next(d for d in box.folders if ch.path.startswith(d + "/"))
+            with open(os.path.join(box.layer(dest)[0], ch.path[len(dest) + 1:]), "rb") as f:
+                new = f.read()
+            out.append(Reviewed(ch.path, "write", _sha(new), host, _diff(ch.path, old, new)))
+        else:
+            out.append(Reviewed(ch.path, ch.action, "", host))
+    digest = _sha(json.dumps([[c.path, c.action, c.staged, c.host] for c in out]).encode())
+    return Review(tuple(out), digest)
+
+
+def commit(box: Box, approved: str) -> Review:
+    """Apply exactly the reviewed stage to the host folders, then clear it. The server must be
+    stopped. Refused if the stage or the host content it replaces changed since the review
+    (no blind commit). Host-side links are never followed. Not transactional: a failure partway
+    leaves earlier entries applied."""
+    current = review(box)  # validates the whole stage before touching anything
+    if current.digest != approved:
+        raise BoxError("the stage or the host changed since it was reviewed: review it again")
     for dest, host in sorted(box.folders.items()):
         upper, _ = box.layer(dest)
         if os.path.isdir(upper):
@@ -281,7 +409,7 @@ def commit(box: Box) -> list[Staged]:
             finally:
                 os.close(fd)
     discard(box)
-    return changes
+    return current
 
 
 def _open_nofollow(path: str) -> int:
