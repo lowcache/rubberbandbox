@@ -75,6 +75,9 @@ MUTANTS = {
   "commit temp name predictable": ("rubberbandbox/box.py", '            tmp = f".rbb-commit-{secrets.token_hex(8)}"', '            tmp = f".rbb-commit-{name}"'),
   "list-ness taken from the value": ("rubberbandbox/core/registry.py", "        if not many:\n            return box.resolve(data)", "        if not data.startswith(\"[\"):\n            return box.resolve(data)"),
   "path-list destinations grantable": ("rubberbandbox/core/registry.py", "            spec = replace(spec, grantable=False)", "            pass"),
+  "unreviewed boxed tools callable": ("rubberbandbox/core/registry.py", "        if kind.partition(\"/\")[0] in self.boxes and self._reverted(kind):", "        if False:"),
+  "door skips unreviewed-in-box check": ("rubberbandbox/core/registry.py", "        blocked = self._unreviewed_in_box(eg.kind)\n        if blocked:\n            return blocked\n        roles = self.roles(eg.kind)", "        roles = self.roles(eg.kind)"),
+  "unconfigured boxes accepted": ("rubberbandbox/core/registry.py", "        if set(self.boxes) - set(self.endpoints):  # an unconfigured box", "        if False:  # an unconfigured box"),
 }
 caught = 0
 for name, (path, old, new) in MUTANTS.items():

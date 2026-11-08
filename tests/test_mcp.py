@@ -173,21 +173,47 @@ def test_unapproved_args_and_unnamed_calls_never_reach_the_server():
         assert out.status == "refused" and "named" in out.reason
 
 
-def test_unreviewed_tools_are_approval_per_call_and_run_once_approved():
+PROBE = ToolManifest("fake/net_probe", "read-private", {})
+
+
+def test_unreviewed_tools_on_a_boxed_server_cannot_be_called_until_approved():
     with fake() as c:
-        sb, reg, hands, _ = box(c)
+        sb, reg, hands, tools = box(c)
+        sb.owner_mint(["fake/net_probe"], ["mcp:fake"], ttl=3600)
+        assert run(sb, hands, {"kind": "fake/net_probe", "args": {}}) == []
+        assert any("unreviewed on a boxed server" in d.get("reason", "")
+                   for _, e, d in sb.store.audit_log() if e == "hands.malformed")
+        reg.approve(PROBE, tools["net_probe"])
         sb.owner_mint(["fake/net_probe"], ["mcp:fake"], ttl=3600)
         (out,) = run(sb, hands, {"kind": "fake/net_probe", "args": {}})
-        assert out.status == "held"
-        assert sb.owner_approve(out.reason.split(":")[0]).status == "sent"
-        assert output(sb).data == "ENETUNREACH"
+        assert out.status == "sent" and output(sb).data == "ENETUNREACH"
+
+
+def test_the_door_blocks_a_boxed_tool_that_reverted_after_binding():
+    with fake() as c:
+        sb, reg, hands, tools = box(c)
+        reg.approve(PROBE, tools["net_probe"])
+        eg = reg.bind("fake/net_probe", {})
+        assert reg.check_egress(eg) is None
+        loose = ToolDescriptor("fake", "net_probe", tools["net_probe"].input_schema, {})  # hints dropped
+        assert reg.observe(loose).outcome == "loosened"
+        assert "unreviewed on a boxed server" in reg.check_egress(eg)  # inner layer, not just invalidation
+
+
+def test_a_box_must_belong_to_an_owner_configured_server():
+    clock = ManualClock()
+    pack = ManifestPack("mcp", Schema("s", {"intent": EnumField("none")}), [], [], Rules())
+    sb = Sandbox([Mount(pack, None)], {}, clock=clock)
+    with pytest.raises(ValueError, match="not configured"):
+        ManifestRegistry(sb, {}, {"s": object()})
 
 
 def test_tool_errors_are_failures_not_outputs():
     with fake() as c:
         sb, reg, hands, tools = box(c)
+        reg.approve(ToolManifest("fake/fail", "read-private", {}), tools["fail"])
+        sb.owner_mint(["fake/fail"], ["mcp:fake"], ttl=3600)
         (out,) = run(sb, hands, {"kind": "fake/fail", "args": {}})
-        out = sb.owner_approve(out.reason.split(":")[0])
         assert out.status == "failed" and "tool error" in out.reason
 
 

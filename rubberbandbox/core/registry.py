@@ -302,6 +302,8 @@ class ManifestRegistry:
         self.sb = sandbox
         self.endpoints = dict(endpoints)
         self.boxes = dict(boxes)  # server -> its box; destination args there are box paths
+        if set(self.boxes) - set(self.endpoints):  # an unconfigured box would escape every box rule
+            raise ValueError(f"boxed servers not configured by the owner: {sorted(set(self.boxes) - set(self.endpoints))}")
         self._minted: dict[str, tuple[str, int]] = {}  # canonical value id -> (server, box generation)
         self._live: dict[str, tuple[str, dict]] = {}  # kind -> (hash, view) last observed
         self._operators: dict[str, Value] = {}
@@ -391,12 +393,26 @@ class ManifestRegistry:
         base, live = self.approved(kind), self._live.get(kind)
         if base is None and live is None:
             return None
-        reverted = base is None or (live is not None and diff(base.view, live[1], base.manifest.args).loosened)
-        if reverted and live:
+        if self._reverted(kind) and live:
             return dict(conservative(kind, live[1]["args"]).args)
         return {a: base.manifest.args[a] for a in base.view["args"]}  # type: ignore[union-attr]
 
+    def _reverted(self, kind: str) -> bool:
+        """No owner-approved manifest, or the live tool loosened past it."""
+        base, live = self.approved(kind), self._live.get(kind)
+        return base is None or (live is not None and bool(diff(base.view, live[1], base.manifest.args).loosened))
+
+    def _unreviewed_in_box(self, kind: str) -> str | None:
+        """In a box, roles decide which args are canonicalised paths; without reviewed roles a raw
+        path would reach the server. Such tools are not callable until the owner approves a manifest."""
+        if kind.partition("/")[0] in self.boxes and self._reverted(kind):
+            return f"{kind} is unreviewed on a boxed server: approve a manifest first"
+        return None
+
     def check_call(self, kind: str, args: Iterable[str]) -> str | None:
+        blocked = self._unreviewed_in_box(kind)
+        if blocked:
+            return blocked
         roles = self.roles(kind)
         if roles is None:
             return f"unknown tool {kind!r}"
@@ -440,6 +456,9 @@ class ManifestRegistry:
         binding bug cannot pass a destination off as payload under an operator grant."""
         if not self.manages(eg.kind):
             return "named args on a tool no server owns" if eg.names else None
+        blocked = self._unreviewed_in_box(eg.kind)
+        if blocked:
+            return blocked
         roles = self.roles(eg.kind)
         if roles is None or not eg.names:
             return "tool call without approved, named args"
