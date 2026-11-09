@@ -109,8 +109,13 @@ MUTANTS = {
   "blind commit accepted": ("rubberbandbox/box.py", "    if current.digest != approved:\n        raise BoxError", "    if False:\n        raise BoxError"),
   "review ignores staged content": ("rubberbandbox/box.py", "    digest = _sha(json.dumps([[c.path, c.action, c.staged, c.host] for c in out]).encode())", "    digest = _sha(json.dumps([[c.path, c.action, c.host] for c in out]).encode())"),
   "review ignores the host": ("rubberbandbox/box.py", "    digest = _sha(json.dumps([[c.path, c.action, c.staged, c.host] for c in out]).encode())", "    digest = _sha(json.dumps([[c.path, c.action, c.staged] for c in out]).encode())"),
-  "deleted dirs not pinned by content": ("rubberbandbox/box.py", '        host, old = _host(box, ch.path, tree=ch.action in ("delete", "replace-dir"))', '        host, old = _host(box, ch.path, tree=False)'),
+  "deleted dirs not pinned by content": ("rubberbandbox/box.py", '        host, old = _host(box, ch.path, tree=True)', '        host, old = _host(box, ch.path, tree=False)'),
   "staged work never reaches the digest": ("rubberbandbox/mcp.py", '            sb.approvals.notice("fs.staged", f"{self.cfg.name}/stage",', '            (lambda *a: None)("fs.staged", f"{self.cfg.name}/stage",'),
+  "file over a host dir not pinned": ("rubberbandbox/box.py", "        host, old = _host(box, ch.path, tree=True)", "        host, old = _host(box, ch.path, tree=ch.action != \"write\")"),
+  "dns lookup has no deadline": ("rubberbandbox/proxy.py", "        if not done.wait(DNS_TIMEOUT):", "        if not done.wait():"),
+  "resolver pool unbounded": ("rubberbandbox/proxy.py", "        self._resolvers = threading.BoundedSemaphore(RESOLVERS)", "        self._resolvers = threading.BoundedSemaphore(10**6)"),
+  "literals wait on the resolver pool": ("rubberbandbox/proxy.py", "        if _literal(host):\n            return socket.getaddrinfo", "        if False:\n            return socket.getaddrinfo"),
+  "refused connect keeps its slot": ("rubberbandbox/proxy.py", "    finally:\n        slots.release()", "    finally:\n        if not isinstance(locals().get('granted'), str):\n            slots.release()"),
 }
 caught = 0
 for name, (path, old, new) in MUTANTS.items():

@@ -212,6 +212,37 @@ def test_a_connect_to_a_name_behind_nat64_loopback_is_refused(upstream, monkeypa
     assert "non-public" in failed["error"] and hits == [] and events(sb, "door.sent") == []
 
 
+def test_a_stalled_lookup_is_refused_at_its_deadline_and_frees_its_slot(upstream, monkeypatch):
+    """More timed-out lookups than connection slots, then a literal still connects: each timeout freed
+    its slot. Stalled lookups never exceed the resolver pool; past it, names are refused at once."""
+    port, hits = upstream
+    real, stall, calls = socket.getaddrinfo, threading.Event(), []
+
+    def resolver(host, *args, **kw):
+        if host.endswith(".stall.test"):
+            calls.append(host)
+            stall.wait(30)
+            raise socket.gaierror("stalled")
+        return real(host, *args, **kw)
+
+    monkeypatch.setattr(proxy.socket, "getaddrinfo", resolver)
+    monkeypatch.setattr(proxy, "DNS_TIMEOUT", 0.2)
+    monkeypatch.setattr(proxy, "MAX_CONNECTIONS", 2)
+    names = [f"n{i}.stall.test:{port}" for i in range(proxy.RESOLVERS + 1)]
+    c, sb, _ = networked()
+    try:
+        with c:
+            sb.owner_mint(["net:fake"], [*names, f"127.0.0.1:{port}"], ttl=3600)
+            for n in names:
+                assert via(c, n)["status"].endswith("403 refused by the door")
+            assert via(c, f"127.0.0.1:{port}")["status"].endswith("200 Connection established")
+    finally:
+        stall.set()
+    errors = [e["error"] for e in events(sb, "door.failed")]
+    assert len(errors) == len(names) and all("no answer within" in e for e in errors[:-1])
+    assert "every resolver is busy" in errors[-1] and len(calls) == proxy.RESOLVERS and hits == [1]
+
+
 def test_a_new_operator_loses_its_network_route(upstream):
     """Same server name, different launch: the door refuses at once, and observing it ends the grant."""
     port, hits = upstream

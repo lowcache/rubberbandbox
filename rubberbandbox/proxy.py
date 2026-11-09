@@ -24,6 +24,8 @@ MAX_CONNECTIONS = 32
 HEAD_TIMEOUT = 10.0
 IDLE_TIMEOUT = 300.0
 CONNECT_TIMEOUT = 10.0
+DNS_TIMEOUT = 5.0
+RESOLVERS = 4  # per server; a lookup past its deadline keeps its resolver until it returns
 RECHECK = 0.5  # a live tunnel re-checks its authorization at least this often, and on every revocation
 
 Gate = Callable[[str], "tuple[socket.socket, Lease] | str"]
@@ -83,6 +85,38 @@ class NetAdapter:
 
     def __init__(self) -> None:
         self._local = threading.local()
+        self._resolvers = threading.BoundedSemaphore(RESOLVERS)
+
+    def _lookup(self, host: str, port: int) -> list:
+        """getaddrinfo under a deadline. Past it the CONNECT is refused (freeing its connection slot)
+        while the lookup finishes in the background, so stalled lookups never exceed RESOLVERS."""
+        if _literal(host):
+            return socket.getaddrinfo(host, port, type=socket.SOCK_STREAM, flags=socket.AI_NUMERICHOST)
+        out: list = []
+        done = threading.Event()
+
+        def run() -> None:
+            try:
+                out.append(socket.getaddrinfo(host, port, type=socket.SOCK_STREAM))
+            except Exception as exc:
+                out.append(exc)
+            finally:
+                self._resolvers.release()
+                done.set()
+
+        worker = threading.Thread(target=run, daemon=True)
+        if not self._resolvers.acquire(blocking=False):
+            raise NetError(f"cannot resolve {host}: every resolver is busy")
+        try:
+            worker.start()
+        except BaseException:
+            self._resolvers.release()
+            raise
+        if not done.wait(DNS_TIMEOUT):
+            raise NetError(f"cannot resolve {host}: no answer within {DNS_TIMEOUT:g} s")
+        if isinstance(out[0], Exception):
+            raise out[0]
+        return out[0]
 
     def begin(self) -> None:
         self._local.pending, self._local.sock = True, None
@@ -96,7 +130,7 @@ class NetAdapter:
             raise NetError("network egress only happens inside a proxy request")
         host, _, port = destination.rpartition(":")
         try:
-            infos = socket.getaddrinfo(host.strip("[]"), int(port), type=socket.SOCK_STREAM)
+            infos = self._lookup(host.strip("[]"), int(port))
         except OSError as exc:
             raise NetError(f"cannot resolve {host}: {exc}") from None
         if not infos:
@@ -194,7 +228,11 @@ def serve(listener: socket.socket, check: Callable[[], Gate | None], on_close: C
             if not slots.acquire(blocking=False):
                 _reply(conn, 503, "too many connections")
                 continue
-            threading.Thread(target=_handle, args=(conn, check(), on_close, slots), daemon=True).start()
+            try:
+                threading.Thread(target=_handle, args=(conn, check(), on_close, slots), daemon=True).start()
+            except Exception:  # no handler: give the slot back and keep accepting
+                slots.release()
+                _reply(conn, 503, "proxy busy")
 
     threading.Thread(target=loop, daemon=True).start()
 

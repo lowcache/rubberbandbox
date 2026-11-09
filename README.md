@@ -31,7 +31,7 @@ calls, their path arguments and their network all cross the one door.
 | Pack wall | ✅ effect manifests · ✅ frozen, versioned manifests with a loosening diff · ✅ MCP stdio adapter · ✅ filesystem box · ✅ network through the door |
 | v1 packs | ✅ messaging (SMS and email) and ✅ coding, both re-expressed as manifests with the original tests unchanged |
 | v1 clerks | ✅ keyword stub · ✅ Claude (API, needs a key) · ✅ Codex (CLI on a ChatGPT plan, locked down and verified on every call) |
-| v1.x | DNS lookup deadline, live manifest drafter, owner-initiated mode (plan-then-execute), real SMS and email adapters, phone approvals, MicroVM deployment, larger adaptive clerk evaluation |
+| v1.x | Live manifest drafter, owner-initiated mode (plan-then-execute), real SMS and email adapters, phone approvals, MicroVM deployment, larger adaptive clerk evaluation |
 | v2 | learning immune system (anomaly scorer on a population prior) |
 
 ## The claim and the evidence
@@ -55,11 +55,10 @@ None of the live clerk's four misses went in the direction an injection demanded
 judgment calls on items the corpus author flagged as debatable, and one was a long padded message
 whose price question was diluted. The corpora are small and the attacks are fixed, not adaptive.
 
-**Structural evidence** (268 tests):
+**Structural evidence** (270 tests):
 - Property tests drive a *fully hostile* clerk and *fully hostile* hands, including hands spanning
   two composed packs, against oracles that don't depend on the door's own logic.
-- A mutation check breaks guards one at a time: 101 of 101 caught on the last full run; the 5
-  guards added for reviewed commits await their first full run. Three times during
+- A mutation check breaks guards one at a time: 111 of 111 caught on the last full run (8 Nov). Four times during
   the build an outer check made an inner guard untestable; each time the surviving mutant exposed
   it and a direct test of the inner layer was added.
 - The box's path canonicaliser is checked against the kernel's own in-root resolution inside a
@@ -224,7 +223,8 @@ boxed server, a tool with no approved manifest cannot be called at all.
 **No blind commit.** `client.review()` lists every staged change: writes with a unified diff
 against the host file (or a size and hash for binary and large content), deletes, replaced
 directories, and links that will never be copied out. Its digest covers the staged content and
-the host content it would replace, including whole directory trees for deletes. `commit(digest)`
+the host content it would replace, including the whole tree of any host directory it removes
+(file modes are applied but not reviewed). `commit(digest)`
 stops the server, recomputes the review, and refuses if either side changed since it was
 reviewed. Each new stage state is posted to the batched digest. Commit never writes through a
 link: host folders are opened without following links at any depth.
@@ -240,6 +240,8 @@ proxy listener inside that namespace and points the server's proxy variables at 
 - **DNS happens door-side, after the grant.** A name that resolves to loopback, private or
   otherwise non-global space (IPv4-mapped and NAT64 forms included) is refused; only an IP literal
   the owner granted may be private. The door connects to exactly the address it checked.
+  A lookup has a 5 s deadline; past it the CONNECT is refused and its connection slot freed.
+  Each server has 4 resolvers, so stalled lookups stay bounded; IP literals need none.
 - **Live tunnels are cut** when their authorization lapses: grant ended or expired, cluster
   stiffened, or the server reconfigured. The check runs before every forwarded chunk and at least
   every half second.
@@ -306,7 +308,6 @@ tests/                   unit, corpus, property, composition, manifests, registr
 - **Nested schema changes compare by equality,** so some genuine narrowings read as loosenings;
   on a boxed server that blocks the tool until the owner re-approves.
 - **Operational gaps:**
-  - DNS lookups have no deadline of their own.
   - A crashed server is not restarted.
   - Tools added after mount wait for a restart.
   - Commit takes the whole reviewed stage (no per-file selection) and is not transactional: a

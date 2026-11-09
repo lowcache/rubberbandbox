@@ -380,7 +380,7 @@ def review(box: Box) -> Review:
         if ch.action == "skip":
             out.append(Reviewed(ch.path, "skip"))
             continue
-        host, old = _host(box, ch.path, tree=ch.action in ("delete", "replace-dir"))
+        host, old = _host(box, ch.path, tree=True)  # any host dir a change removes is pinned by content
         if ch.action == "write":
             dest = next(d for d in box.folders if ch.path.startswith(d + "/"))
             with open(os.path.join(box.layer(dest)[0], ch.path[len(dest) + 1:]), "rb") as f:

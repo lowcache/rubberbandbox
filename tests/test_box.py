@@ -310,6 +310,10 @@ def test_commit_refuses_a_stage_that_changed_after_review(folder):
     with boxed(folder) as c:
         c.call("write", {"path": "/data/a.txt", "text": "reviewed"})
         seen = c.review().digest
+        c.call("write", {"path": "/data/a.txt", "text": "rewritten"})  # same paths and actions: only content differs
+        with pytest.raises(BoxError, match="changed since it was reviewed"):
+            c.commit(seen)
+        seen = c.review().digest
         c.call("write", {"path": "/data/b.txt", "text": "slipped in after the review"})
         with pytest.raises(BoxError, match="changed since it was reviewed"):
             c.commit(seen)
@@ -329,6 +333,20 @@ def test_commit_refuses_when_the_host_changed_under_the_review(folder):
         with pytest.raises(BoxError, match="changed since it was reviewed"):
             c.commit(seen)
     assert (host / "old.txt").read_text() == "the owner edited this meanwhile"
+
+
+def test_a_directory_replaced_by_a_file_is_pinned_by_its_whole_content(folder):
+    host, _ = folder
+    with boxed(folder) as c:
+        c.call("rm", {"path": "/data/docs"})
+        c.call("write", {"path": "/data/docs", "text": "now a file"})
+        r = c.review()
+        (ch,) = [x for x in r.changes if x.path == "/data/docs"]
+        assert ch.action == "write" and ch.host.startswith("dir:") and "(host: dir)" in r.render()
+        (host / "docs" / "added-later.txt").write_text("not what was reviewed")
+        with pytest.raises(BoxError, match="changed since it was reviewed"):
+            c.commit(r.digest)
+    assert (host / "docs" / "keep.txt").exists()
 
 
 def test_a_deleted_directory_is_pinned_by_its_whole_content(folder):
