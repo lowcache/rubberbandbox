@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from math import floor
 
 from .store import Store, egress_blob, egress_from_blob, parse_id
 from .types import Authorization, Egress
@@ -33,10 +34,19 @@ class Digest:
 
 
 class Approvals:
-    def __init__(self, store: Store, config: DigestConfig) -> None:
+    def __init__(self, store: Store, config: DigestConfig, now: float) -> None:
         self.store = store
         self.config = config
-        self._last_digest: float | None = None
+        with self.store.tx() as db:
+            row = db.execute("SELECT next_due FROM digest_clock WHERE id=1").fetchone()
+            if row is not None and row[0] <= now:
+                next_due = self._advance(row[0], now)
+                db.execute("UPDATE digest_clock SET next_due=? WHERE id=1", (next_due,))
+                self.store.audit(now, "digest.missed", missed_due=row[0], next_due=next_due)
+
+    def _advance(self, next_due: float, now: float) -> float:
+        interval = self.config.interval
+        return next_due + (floor((now - next_due) / interval) + 1) * interval
 
     def hold(self, egress: Egress, cluster: str, reason: str, now: float) -> str:
         """Queue for the owner. Repeats of a pending egress collapse into one entry."""
@@ -82,10 +92,16 @@ class Approvals:
 
     def digest(self, now: float) -> Digest | None:
         """Return the digest if one is due on the fixed schedule, else None."""
-        if self._last_digest is not None and now - self._last_digest < self.config.interval:
-            return None
-        since = self._last_digest if self._last_digest is not None else float("-inf")
-        self._last_digest = now
+        with self.store.tx() as db:
+            row = db.execute("SELECT next_due, last_released FROM digest_clock WHERE id=1").fetchone()
+            if row is not None and now < row[0]:
+                return None
+            since = row[1] if row is not None else float("-inf")
+            next_due = self._advance(row[0], now) if row is not None else now + self.config.interval
+            db.execute(
+                "INSERT OR REPLACE INTO digest_clock (id, next_due, last_released) VALUES (1,?,?)",
+                (next_due, now),
+            )
         rows = self.store.db.execute(
             "SELECT id, cluster, reason FROM approvals WHERE status='pending' ORDER BY id"
         ).fetchall()

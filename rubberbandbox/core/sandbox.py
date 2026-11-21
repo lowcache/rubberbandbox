@@ -39,6 +39,13 @@ MAX_LITERAL = 2048
 
 
 @dataclass(frozen=True)
+class ClerkBudget:
+    per_sender: int
+    sender_window: float
+    per_day: int
+
+
+@dataclass(frozen=True)
 class Mount:
     """A pack and the clerk that reads its inbound content."""
 
@@ -86,6 +93,7 @@ class Sandbox:
         lane: LaneConfig = LaneConfig(),
         digest: DigestConfig = DigestConfig(),
         db: str = ":memory:",
+        clerk_budget: ClerkBudget | None = None,
     ) -> None:
         if not mounts:
             raise ValueError("at least one pack must be mounted")
@@ -105,14 +113,19 @@ class Sandbox:
                 self._kind_owner[name] = m.pack
         self.hands = hands
         self.clock = clock
+        self.clerk_budget = clerk_budget
         self.store = Store(db)
         self.grants = GrantBook(self.store)
         self.lane = PublicLane(self.store, lane, rng or random.Random())
-        self.approvals = Approvals(self.store, digest)
+        self.approvals = Approvals(self.store, digest, self.clock())
         self._door = Door(self.store, self.grants, self.kinds, adapters, clock)
-        self.published: dict[str, Value] = {}
-        self.workspace: list[Value] = []
-        self.stiffened: set[str] = set()
+        self.published: dict[str, Value] = {
+            name: self.store.get(vid) for name, vid in self.store.db.execute("SELECT name, vid FROM published")
+        }
+        self.workspace: list[Value] = [
+            self.store.get(vid) for vid, in self.store.db.execute("SELECT vid FROM workspace ORDER BY rowid")
+        ]
+        self.stiffened: set[str] = {c for c, in self.store.db.execute("SELECT cluster FROM stiffened")}
         self.registry: ManifestRegistry | None = None
         self.revoked = 0  # bumped by every revocation; live tunnels re-check when it moves
 
@@ -125,12 +138,17 @@ class Sandbox:
 
     def owner_publish(self, name: str, data: str) -> Value:
         v = self.store.put(data, OWNER_PUBLIC, "owner:published", self.clock())
+        self.store.db.execute(
+            "INSERT INTO published (name, vid) VALUES (?,?) ON CONFLICT(name) DO UPDATE SET vid=excluded.vid",
+            (name, v.id),
+        )
         self.published[name] = v
         return v
 
     def owner_put(self, data: str) -> Value:
         """Owner-private data visible to the hands as a token (e.g. a credential, a file)."""
         v = self.store.put(data, OWNER_PRIVATE, "owner:workspace", self.clock())
+        self.store.db.execute("INSERT INTO workspace (vid) VALUES (?)", (v.id,))
         self.workspace.append(v)
         return v
 
@@ -164,6 +182,7 @@ class Sandbox:
         """Tighten private work for a cluster. Never touches the public lane."""
         self.stiffened.add(cluster)
         self.revoked += 1
+        self.store.db.execute("INSERT OR REPLACE INTO stiffened (cluster, at) VALUES (?,?)", (cluster, self.clock()))
         self.store.audit(self.clock(), "stiffen", cluster=cluster)
 
     def tick(self) -> list[tuple[str, str]]:
@@ -238,10 +257,46 @@ class Sandbox:
         raw = self.store.put(event.text, label, event.channel, now)
         self.store.audit(now, "inbound", channel=event.channel, delivery=event.delivery_id,
                          authenticated=event.authenticated, raw=raw.id)
+        def record(status: str, extracted: object = None) -> None:
+            blob = None
+            if status in {"ok", "rejected"}:
+                try:
+                    blob = json.dumps(extracted, sort_keys=True)
+                except Exception:
+                    pass  # Recording must not alter routing for unserialisable clerk output.
+            self.store.db.execute(
+                "INSERT INTO classifications (raw, channel, at, extracted, status) VALUES (?,?,?,?,?)",
+                (raw.id, event.channel, now, blob, status),
+            )
+
+        if self.clerk_budget is not None:
+            budget = self.clerk_budget
+            with self.store.tx() as db:
+                sender_calls = db.execute(
+                    "SELECT COUNT(*) FROM clerk_calls WHERE origin=? AND at>?",
+                    (event.origin, now - budget.sender_window),
+                ).fetchone()[0]
+                day_calls = db.execute(
+                    "SELECT COUNT(*) FROM clerk_calls WHERE at>?", (now - 86400,),
+                ).fetchone()[0]
+                limit = None
+                if sender_calls >= budget.per_sender:
+                    limit = "sender"
+                elif day_calls >= budget.per_day:
+                    limit = "day"
+                if limit is not None:
+                    record("budget")
+                    self.store.audit(now, "clerk.budget", raw=raw.id, origin=event.origin, limit=limit)
+                    self.approvals.notice("quarantined", self._cluster(event.origin, pack), raw.id, now)
+                    return [Outcome("airlock", event.origin, "quarantined", "clerk budget exhausted")]
+                db.execute("INSERT INTO clerk_calls (origin, at) VALUES (?,?)", (event.origin, now))
+        clerk_failed = False
         try:
             extracted = mount.clerk.extract(event.text)
         except Exception as exc:  # a clerk that fails (API error, refusal) is just uncertain
             extracted = None
+            clerk_failed = True
+            record("error")
             self.store.audit(now, "clerk.error", raw=raw.id, error=repr(exc))
         try:
             cf = validate(
@@ -251,11 +306,14 @@ class Sandbox:
                 lambda span, label: self.store.put(span, label, f"{event.channel}:span", now),
             )
         except AirlockViolation as exc:
+            if not clerk_failed:
+                record("rejected", extracted)
             # uncertain means ask, never act
             self.store.audit(now, "airlock.reject", raw=raw.id, reason=str(exc))
             self.approvals.notice("unreadable", self._cluster(event.origin, pack), raw.id, now)
             return [Outcome("airlock", event.origin, "noticed", str(exc))]
 
+        record("ok", extracted)
         route = pack.route(event)
         ctx = DecideContext(
             casefile=cf,

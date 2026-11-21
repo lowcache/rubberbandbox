@@ -28,7 +28,7 @@ from .registry import (
     security_view,
     view_hash,
 )
-from .sandbox import ManualClock, Mount, Outcome, Sandbox
+from .sandbox import ClerkBudget, ManualClock, Mount, Outcome, Sandbox
 from .types import (
     Authorization,
     Clerk,

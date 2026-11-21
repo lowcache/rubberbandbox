@@ -12,7 +12,31 @@ from typing import Iterator
 from .labels import Confidentiality, Integrity, Label, Value
 from .types import Egress
 
+SCHEMA_VERSION = 1
+
+
+class StoreError(Exception):
+    """The database schema is incompatible."""
+
+
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS sources (name TEXT PRIMARY KEY, cursor TEXT);
+CREATE TABLE IF NOT EXISTS inbound_seen (
+  source TEXT NOT NULL, delivery_id TEXT NOT NULL, status TEXT NOT NULL, at REAL NOT NULL,
+  PRIMARY KEY (source, delivery_id));
+CREATE TABLE IF NOT EXISTS owner_queue (
+  id INTEGER PRIMARY KEY, at REAL NOT NULL, action TEXT NOT NULL, ref TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued', result TEXT);
+CREATE TABLE IF NOT EXISTS digests (id INTEGER PRIMARY KEY, at REAL NOT NULL, body TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS classifications (
+  raw TEXT PRIMARY KEY, channel TEXT NOT NULL, at REAL NOT NULL, extracted TEXT, status TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS labels (raw TEXT PRIMARY KEY, label TEXT NOT NULL, at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS clerk_calls (id INTEGER PRIMARY KEY, origin TEXT NOT NULL, at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS stiffened (cluster TEXT PRIMARY KEY, at REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS published (name TEXT PRIMARY KEY, vid TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS workspace (vid TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS digest_clock (
+  id INTEGER PRIMARY KEY CHECK (id=1), next_due REAL NOT NULL, last_released REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS vals (
   rowid INTEGER PRIMARY KEY, data TEXT NOT NULL, integrity TEXT NOT NULL,
   confidentiality TEXT NOT NULL, source TEXT NOT NULL, first_seen REAL NOT NULL);
@@ -121,7 +145,19 @@ class Store:
     def __init__(self, path: str = ":memory:") -> None:
         # explicit transactions only
         self.db = _LockedDB(sqlite3.connect(path, isolation_level=None, check_same_thread=False))
-        self.db.executescript(_SCHEMA)
+        tables = self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+        version = self.db.execute("PRAGMA user_version").fetchone()[0]
+        if (tables or version != 0) and version != SCHEMA_VERSION:
+            self.db._conn.close()
+            raise StoreError(f"unsupported schema version {version}; expected {SCHEMA_VERSION}")
+        if path != ":memory:":
+            self.db.execute("PRAGMA busy_timeout=5000")
+            self.db.execute("PRAGMA journal_mode=WAL")
+        self.db.executescript(
+            "BEGIN IMMEDIATE;\n" + _SCHEMA + f"PRAGMA user_version={SCHEMA_VERSION};\nCOMMIT;"
+        )
 
     @contextmanager
     def tx(self) -> Iterator[_LockedDB]:

@@ -26,6 +26,35 @@ def _colorize(line: str) -> str:
 
 def main(argv: list[str]) -> int:
     cmd = argv[0] if argv else "attacks"
+    if cmd in {"digest", "pending", "quarantine", "approve", "deny", "stiffen", "queue", "sample", "label", "metrics"}:
+        from rubberbandbox.console import main as console_main
+
+        return console_main(argv)
+    if cmd == "run":
+        import argparse
+        import signal
+        import threading
+
+        from rubberbandbox.config import build, load
+
+        parser = argparse.ArgumentParser(prog="rubberbandbox run")
+        parser.add_argument("--config", required=True)
+        args = parser.parse_args(argv[1:])
+        config = load(args.config)
+        sandbox, runtime = build(config)
+        stop = threading.Event()
+        previous = {}
+        try:
+            for sig in (signal.SIGTERM, signal.SIGINT):
+                previous[sig] = signal.signal(sig, lambda *_: stop.set())
+            sandbox.store.audit(sandbox.clock(), "runtime.start", mode=config.mode)
+            runtime.run_forever(stop, config.poll_interval)
+        finally:
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
+            runtime.close()
+            sandbox.store.db._conn.close()
+        return 0
     if cmd == "attacks":
         results = run_attacks(argv[1] if len(argv) > 1 else "corpus/messaging_attacks.json")
         for r in results:
