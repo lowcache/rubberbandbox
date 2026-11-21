@@ -38,9 +38,12 @@ class NetError(RuntimeError):
 def target(authority: str) -> str | None:
     """Normal form 'host:port' (lowercase IDNA name, or IP literal; IPv6 in brackets), else None."""
     host, sep, port = authority.rpartition(":")
-    if not sep or not port.isascii() or not port.isdigit() or not 0 < int(port) < 65536 or "@" in host:
+    if not sep or not port.isascii() or not port.isdigit() or len(port) > 5 or not 0 < int(port) < 65536 \
+            or "@" in host:
         return None
     if host.startswith("[") and host.endswith("]"):
+        if "%" in host:  # a zone id is box-chosen text, never a destination
+            return None
         try:
             return f"[{ipaddress.IPv6Address(host[1:-1]).compressed}]:{int(port)}"
         except ValueError:
@@ -69,6 +72,7 @@ def _literal(host: str) -> bool:
 
 
 _NAT64 = ipaddress.IPv6Network("64:ff9b::/96")  # global as a prefix, but it embeds any IPv4 address
+_UNICAST6 = ipaddress.IPv6Network("2000::/3")  # IPv6 global unicast; everything else is refused
 
 
 def _public(addr: str) -> bool:
@@ -77,7 +81,9 @@ def _public(addr: str) -> bool:
         ip = ip.ipv4_mapped
     elif isinstance(ip, ipaddress.IPv6Address) and ip in _NAT64:
         ip = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
-    return ip.is_global  # 6to4 and Teredo are not global: refused outright
+    if isinstance(ip, ipaddress.IPv6Address) and ip not in _UNICAST6:
+        return False  # site-local, IPv4-compatible or -translated, multicast: is_global wrongly says yes
+    return ip.is_global and not ip.is_multicast  # 6to4 and Teredo are not global: refused outright
 
 
 class NetAdapter:
@@ -154,19 +160,26 @@ class Lease:
     revocation at most one already-checked chunk per direction is written; an idle tunnel is cut
     within RECHECK."""
 
-    def __init__(self, sandbox: object, kind: str, dest: str, seen: int) -> None:
-        """`seen`: the revocation count read before the connection was authorized, so a revocation
-        landing between authorization and this lease is caught by the first ok()."""
+    def __init__(self, sandbox: object, kind: str, dest: str, seen: int, at: float | None = None) -> None:
+        """`seen` and `at`: the revocation count and the time read before the connection was authorized,
+        so a revocation or a lapse during the lookup and dial is caught by the first ok()."""
         self.sb, self.kind, self.dest = sandbox, kind, dest
-        self._seen, self._at, self._ok = seen, time.monotonic(), True
+        self._seen, self._at, self._ok = seen, time.monotonic() if at is None else at, True
+        self._until = self._expiry()
         self._lock = threading.Lock()  # both pumps ask; a check in progress is never read as passed
+
+    def _expiry(self) -> float | None:
+        """When the covering grant runs out (sandbox clock); reaching it forces a full re-check."""
+        expiry = getattr(self.sb, "grant_expiry", None)
+        return expiry(self.kind, self.dest) if expiry else None
 
     def ok(self) -> bool:
         with self._lock:
             now, revoked = time.monotonic(), self.sb.revoked  # type: ignore[attr-defined]
-            if self._ok and (revoked != self._seen or now - self._at >= RECHECK):
+            expired = self._until is not None and self.sb.clock() >= self._until  # type: ignore[attr-defined]
+            if self._ok and (revoked != self._seen or now - self._at >= RECHECK or expired):
                 self._ok = self.sb.still_allowed(self.kind, self.dest)  # type: ignore[attr-defined]
-                self._seen, self._at = revoked, now
+                self._seen, self._at, self._until = revoked, now, self._expiry()
             return self._ok
 
 
@@ -174,7 +187,7 @@ def gate(sandbox: object, kind: str, adapter: NetAdapter) -> Gate:
     """Authorize one CONNECT through the sandbox's door; the connected socket and its lease, or why not."""
 
     def check(dest: str) -> tuple[socket.socket, Lease] | str:
-        seen = sandbox.revoked  # type: ignore[attr-defined]
+        seen, at = sandbox.revoked, time.monotonic()  # type: ignore[attr-defined]
         adapter.begin()
         try:
             out = sandbox.connect(kind, dest)  # type: ignore[attr-defined]
@@ -184,7 +197,7 @@ def gate(sandbox: object, kind: str, adapter: NetAdapter) -> Gate:
             if sock is not None:
                 sock.close()
             return out.reason
-        return (sock, Lease(sandbox, kind, dest, seen)) if sock is not None else "no connection"
+        return (sock, Lease(sandbox, kind, dest, seen, at)) if sock is not None else "no connection"
 
     return check
 
@@ -220,10 +233,18 @@ def serve(listener: socket.socket, check: Callable[[], Gate | None], on_close: C
     `slots` is the server's connection budget, shared across relaunches of its box."""
 
     def loop() -> None:
+        listener.settimeout(RECHECK)  # a close from another thread never wakes a blocked accept
         while True:
             try:
                 conn, _ = listener.accept()
-            except OSError:
+            except OSError as exc:
+                if listener.fileno() == -1:
+                    return
+                if not isinstance(exc, socket.timeout):
+                    time.sleep(RECHECK)  # transient (EMFILE, ECONNABORTED): keep accepting
+                continue
+            if listener.fileno() == -1:  # closed while this connection was pending
+                conn.close()
                 return
             if not slots.acquire(blocking=False):
                 _reply(conn, 503, "too many connections")
@@ -246,9 +267,13 @@ def _reply(conn: socket.socket, code: int, reason: str) -> None:
 
 
 def _head(conn: socket.socket) -> bytes | None:
-    conn.settimeout(HEAD_TIMEOUT)
+    deadline = time.monotonic() + HEAD_TIMEOUT  # for the whole head, not each recv
     buf = b""
     while b"\r\n\r\n" not in buf:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return None
+        conn.settimeout(left)
         try:
             chunk = conn.recv(MAX_HEAD + 1 - len(buf))
         except OSError:
@@ -280,27 +305,50 @@ def _handle(conn: socket.socket, check: Gate | None, on_close: Callable[[str, in
         if isinstance(granted, str):
             return _reply(conn, 403, "refused by the door")
         upstream, lease = granted
-        conn.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
+        try:
+            conn.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
+        except OSError:  # the box hung up before the tunnel opened
+            upstream.close()
+            conn.close()
+            return on_close(dest, 0, 0, not lease.ok())
         on_close(dest, *_splice(conn, upstream, early, lease))
     finally:
         slots.release()
 
 
 def _splice(a: socket.socket, b: socket.socket, early: bytes, lease: Lease) -> tuple[int, int, bool]:
-    """Copy both ways until either side closes, idles out, or the lease lapses (then both are cut).
-    Returns (bytes box->out, bytes out->box, cut)."""
-    counts, cut = [0, 0], threading.Event()
+    """Copy both ways until either side closes, the tunnel idles out (no bytes either way), or the lease
+    lapses (then both are cut). Returns (bytes box->out, bytes out->box, cut)."""
+    counts, cut, last = [0, 0], threading.Event(), [time.monotonic()]
     for s in (a, b):
         s.settimeout(RECHECK)
+
+    def send(dst: socket.socket, data: bytes, i: int) -> bool:
+        """Write all of `data`. A slow reader is waited for, re-checking the lease while it stalls;
+        False once the tunnel must end."""
+        view = memoryview(data)
+        while view:
+            if cut.is_set():
+                return False
+            try:
+                n = dst.send(view)
+            except socket.timeout:
+                if not lease.ok():
+                    cut.set()
+                    return False
+                if time.monotonic() - last[0] >= IDLE_TIMEOUT:
+                    return False
+                continue
+            view, counts[i], last[0] = view[n:], counts[i] + n, time.monotonic()
+        return True
+
     try:
         if early and lease.ok():  # a client that sent bytes before our 200
-            b.sendall(early)
-            counts[0] = len(early)
+            send(b, early, 0)
     except OSError:
         pass
 
     def pump(src: socket.socket, dst: socket.socket, i: int) -> None:
-        idle = 0.0
         try:
             while not cut.is_set():
                 if not lease.ok():
@@ -309,8 +357,7 @@ def _splice(a: socket.socket, b: socket.socket, early: bytes, lease: Lease) -> t
                 try:
                     chunk = src.recv(65536)
                 except socket.timeout:
-                    idle += RECHECK
-                    if idle >= IDLE_TIMEOUT:
+                    if time.monotonic() - last[0] >= IDLE_TIMEOUT:
                         break
                     continue
                 if not chunk:
@@ -318,9 +365,8 @@ def _splice(a: socket.socket, b: socket.socket, early: bytes, lease: Lease) -> t
                 if not lease.ok():  # the check right before anything crosses
                     cut.set()
                     break
-                dst.sendall(chunk)
-                counts[i] += len(chunk)
-                idle = 0.0
+                if not send(dst, chunk, i):
+                    break
         except OSError:
             pass
         for s in (src, dst):
@@ -330,7 +376,12 @@ def _splice(a: socket.socket, b: socket.socket, early: bytes, lease: Lease) -> t
                 pass
 
     t = threading.Thread(target=pump, args=(b, a, 1), daemon=True)
-    t.start()
+    try:
+        t.start()
+    except RuntimeError:  # no second pump: end the tunnel rather than run it one way
+        a.close()
+        b.close()
+        return counts[0], counts[1], cut.is_set()
     pump(a, b, 0)
     t.join()
     a.close()

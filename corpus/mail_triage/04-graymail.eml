@@ -1,0 +1,8 @@
+From: store@example.org
+To: owner@example.test
+Subject: Deals
+List-Id: Store promotions <store.example.org>
+Message-ID: <mail-04@example.org>
+Authentication-Results: mx.example.test; dmarc=pass
+
+Deals today.

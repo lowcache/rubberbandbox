@@ -6,13 +6,15 @@ import math
 import os
 import time
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
 from .core.approvals import DigestConfig
 from .core.sandbox import ClerkBudget, Mount, Sandbox
 from .packs.messaging import CLERK_GUIDE, KINDS, SCHEMA, KeywordClerk, MessagingPack
+from .packs.triage import CLERK_GUIDE as TRIAGE_GUIDE, KINDS as TRIAGE_KINDS, SCHEMA as TRIAGE_SCHEMA, KeywordTriageClerk, TriagePack
+from .mail import EmlSource, ImapSource
 from .runtime import JsonlSource, Runtime, ShadowAdapter, daemon_lock
 
 
@@ -23,7 +25,16 @@ class ConfigError(ValueError):
 @dataclass(frozen=True)
 class SourceConfig:
     name: str
-    path: str
+    kind: str = "jsonl"
+    path: str | None = None
+    authserv_id: str | None = None
+    include_body: bool = False
+    host: str | None = None
+    port: int = 993
+    user: str | None = None
+    password_ref: Mapping[str, str] = field(default_factory=dict)  # password_env or password_file
+    mailbox: str = "INBOX"
+    backfill: int = 0
 
 
 @dataclass(frozen=True)
@@ -35,6 +46,7 @@ class Config:
     clerk_kind: str
     clerk_budget: ClerkBudget
     sources: tuple[SourceConfig, ...]
+    pack: str = "messaging"
 
 
 def _secrets(value: object) -> None:
@@ -90,10 +102,12 @@ def load(path: str) -> Config:
     except (OSError, tomllib.TOMLDecodeError) as exc:
         raise ConfigError(str(exc)) from exc
     _secrets(data)
-    unknown = set(data) - {"db", "mode", "poll_interval", "digest", "clerk", "source"}
+    unknown = set(data) - {"db", "mode", "poll_interval", "digest", "clerk", "source", "pack"}
     if unknown:
         raise ConfigError(f"unknown top-level keys: {', '.join(sorted(unknown))}")
     db, mode = _text(data, "db"), _text(data, "mode")
+    pack = data.get("pack", "messaging")
+    if pack not in {"messaging", "triage"}: raise ConfigError("pack must be messaging or triage")
     if mode != "shadow":
         raise ConfigError("live mode is not available: no real outbound adapters")
     digest, clerk, sources = data.get("digest", {}), data.get("clerk", {}), data.get("source", [])
@@ -113,16 +127,39 @@ def load(path: str) -> Config:
         raise ConfigError("missing clerk budget: the daemon never runs an unbudgeted clerk")
     configs = []
     for source in sources:
-        if not isinstance(source, dict) or source.get("kind") != "jsonl":
-            raise ConfigError("source kind must be jsonl")
-        _known(source, "[[source]]", {"kind", "name", "path"})
-        configs.append(SourceConfig(_text(source, "name"), _text(source, "path")))
+        if not isinstance(source, dict): raise ConfigError("source must be a table")
+        source_kind = source.get("kind")
+        if source_kind == "jsonl":
+            _known(source, "[[source]]", {"kind", "name", "path"})
+            configs.append(SourceConfig(_text(source, "name"), "jsonl", path=_text(source, "path")))
+        elif source_kind == "eml":
+            _known(source, "[[source]]", {"kind", "name", "path", "authserv_id", "include_body"})
+            body = source.get("include_body", False)
+            if type(body) is not bool: raise ConfigError("include_body must be boolean")
+            configs.append(SourceConfig(_text(source, "name"), "eml", path=_text(source, "path"), authserv_id=_text(source, "authserv_id"), include_body=body))
+        elif source_kind == "imap":
+            _known(source, "[[source]]", {"kind", "name", "host", "port", "user", "password_env", "password_file", "mailbox", "authserv_id", "include_body", "backfill"})
+            body, backfill = source.get("include_body", False), source.get("backfill", 0)
+            if type(body) is not bool or type(backfill) is not int or backfill < 0: raise ConfigError("invalid imap source option")
+            port = source.get("port", 993)
+            if type(port) is not int or not 0 < port < 65536: raise ConfigError("port must be valid")
+            mailbox = source.get("mailbox", "INBOX")
+            if not isinstance(mailbox, str) or not mailbox:
+                raise ConfigError("mailbox must be a nonempty string")
+            ref = {k: source[k] for k in ("password_env", "password_file") if k in source}
+            if len(ref) != 1:
+                raise ConfigError("provide exactly one of password_env or password_file")
+            configs.append(SourceConfig(_text(source, "name"), "imap", host=_text(source, "host"), port=port,
+                                        user=_text(source, "user"), password_ref=ref, mailbox=mailbox,
+                                        authserv_id=_text(source, "authserv_id"), include_body=body,
+                                        backfill=backfill))
+        else: raise ConfigError("unknown source kind")
     if len({s.name for s in configs}) != len(configs):
         raise ConfigError("duplicate source names")
     return Config(db, mode, _number(data, "poll_interval", 5.0),
                   DigestConfig(_number(digest, "interval", DigestConfig().interval),
                                _number(digest, "per_cluster", DigestConfig().per_cluster, integer=True)),
-                  kind, budget, tuple(configs))
+                  kind, budget, tuple(configs), pack)
 
 
 def build(config: Config) -> tuple[Sandbox, Runtime]:
@@ -134,18 +171,28 @@ def build(config: Config) -> tuple[Sandbox, Runtime]:
     sandbox = None
     try:
         if config.clerk_kind == "stub":
-            clerk = KeywordClerk()
+            clerk = KeywordTriageClerk() if config.pack == "triage" else KeywordClerk()
         elif config.clerk_kind == "codex":
             from .clerks.codex import CodexClerk
-            clerk = CodexClerk(SCHEMA, CLERK_GUIDE)
+            clerk = CodexClerk(TRIAGE_SCHEMA, TRIAGE_GUIDE) if config.pack == "triage" else CodexClerk(SCHEMA, CLERK_GUIDE)
         else:
             raise ConfigError(f"unknown clerk kind: {config.clerk_kind}")
         # Door copies the mapping; bind the shared adapter before the runtime can poll.
         adapter = ShadowAdapter(None)
-        sandbox = Sandbox([Mount(MessagingPack(), clerk)], {kind: adapter for kind in KINDS},
+        pack = TriagePack() if config.pack == "triage" else MessagingPack()
+        kinds = TRIAGE_KINDS if config.pack == "triage" else KINDS
+        sandbox = Sandbox([Mount(pack, clerk)], {kind: adapter for kind in kinds},
                           clock=time.time, db=config.db, digest=config.digest, clerk_budget=config.clerk_budget)
         adapter.store, adapter.clock = sandbox.store, sandbox.clock
-        return sandbox, Runtime(sandbox, [JsonlSource(s.name, s.path) for s in config.sources], _lock=lock)
+        source_objects = []
+        for s in config.sources:
+            if s.kind == "jsonl": source_objects.append(JsonlSource(s.name, s.path))
+            elif s.kind == "eml": source_objects.append(EmlSource(s.name, s.path, authserv_id=s.authserv_id, include_body=s.include_body))
+            else: source_objects.append(ImapSource(s.name, host=s.host, port=s.port, user=s.user,
+                                                   password=resolve_secret(s.password_ref, "password"),
+                                                   mailbox=s.mailbox, authserv_id=s.authserv_id,
+                                                   include_body=s.include_body, backfill=s.backfill))
+        return sandbox, Runtime(sandbox, source_objects, _lock=lock)
     except BaseException:
         lock.close()
         if sandbox is not None:

@@ -1,0 +1,8 @@
+From: news@example.org
+To: owner@example.test
+Subject: Weekly newsletter
+List-Unsubscribe: <https://news.example.org/unsub>
+Message-ID: <mail-03@example.org>
+Authentication-Results: mx.example.test; dmarc=pass
+
+This week's news.

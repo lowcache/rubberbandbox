@@ -1,0 +1,7 @@
+From: team@example.org
+To: owner@example.test
+Subject: Meeting
+Message-ID: <mail-02@example.org>
+Authentication-Results: mx.example.test; dmarc=pass
+
+Notes attached.

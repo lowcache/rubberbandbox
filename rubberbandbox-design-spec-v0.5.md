@@ -184,7 +184,7 @@ Reference implementation runs, 6 November 2026. *Harm* counts only what the simu
 |---|---|
 | Attack corpus (32 routing attacks: spoofing, premium routes, replay, Reply-To, loops, floods) | 32/32 behave as specified |
 | Property tests: fully hostile clerk; fully hostile hands; hostile hands across two composed packs | invariant holds; oracles independent of the door |
-| Mutation check (deliberately broken guards; `scripts/mutation_check.py`) | 12/12 caught (6 Nov); 101/101 after the pack wall (7 Nov); 111/111 (8 Nov) |
+| Mutation check (deliberately broken guards; `scripts/mutation_check.py`) | 12/12 caught (6 Nov); 101/101 after the pack wall (7 Nov); 111/111 (8 Nov); 168/168 with the launch runtime and proxy fixes (21 Nov) |
 | Independent correctness reviews (separate model family) | core: 4 defects, each reproduced as a failing test and fixed; each pack-wall slice reviewed, real findings fixed with regression tests |
 | Path canonicaliser vs the kernel's own in-root resolution, inside a real box | Hypothesis-generated trees of files and absolute, relative, looping and dangling links: identical results |
 | Unseen MCP servers, run unchanged in the box | official filesystem server; `server-sequential-thinking`; a Hacker News server fetching live stories through the door on one granted target |

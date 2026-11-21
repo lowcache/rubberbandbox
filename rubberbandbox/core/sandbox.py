@@ -204,6 +204,11 @@ class Sandbox:
             return Outcome(kind, target, "refused", "no grant covers this target")
         return Outcome(kind, target, *self._door.cross(Egress(kind, dest, ()), Authorization("grant", grant.id)))
 
+    def grant_expiry(self, kind: str, target: str) -> float | None:
+        """When the grant now covering `target` expires, or None. Live tunnels cut at this moment."""
+        grant = self.grants.find(kind, target, self.clock())
+        return grant.expires_at if grant else None
+
     def still_allowed(self, kind: str, target: str) -> bool:
         """Would a connection to `target` be authorized right now? Live tunnels ask this; it dials nothing."""
         now = self.clock()

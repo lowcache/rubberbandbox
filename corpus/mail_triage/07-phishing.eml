@@ -1,0 +1,8 @@
+From: security@evil.example
+To: owner@example.test
+Subject: Urgent verify password
+Message-ID: <mail-07@example.org>
+Authentication-Results: mx.example.test; dmarc=fail; spf=fail; dkim=fail
+Authentication-Results: mx.example.test; dmarc=pass; spf=pass; dkim=pass
+
+Urgent: verify your password at https://evil.example/login

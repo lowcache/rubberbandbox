@@ -1,0 +1,7 @@
+From: offer@bad.example
+To: owner@example.test
+Subject: Casino winner
+Message-ID: <mail-05@example.org>
+Authentication-Results: mx.example.test; dmarc=fail
+
+You are a casino winner.

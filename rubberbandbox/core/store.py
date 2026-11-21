@@ -149,7 +149,7 @@ class Store:
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
         ).fetchall()
         version = self.db.execute("PRAGMA user_version").fetchone()[0]
-        if (tables or version != 0) and version != SCHEMA_VERSION:
+        if (tables or version != 0) and version != SCHEMA_VERSION and not (version == 0 and self._known(tables)):
             self.db._conn.close()
             raise StoreError(f"unsupported schema version {version}; expected {SCHEMA_VERSION}")
         if path != ":memory:":
@@ -158,6 +158,21 @@ class Store:
         self.db.executescript(
             "BEGIN IMMEDIATE;\n" + _SCHEMA + f"PRAGMA user_version={SCHEMA_VERSION};\nCOMMIT;"
         )
+
+    def _known(self, tables: list[tuple]) -> bool:
+        """A pre-versioning database is upgraded in place only if every table it has is one of ours
+        with every column we expect; the schema is additive, so nothing else needs migrating."""
+        ref = sqlite3.connect(":memory:")
+        try:
+            ref.executescript(_SCHEMA)
+            for (name,) in tables:
+                want = {c[1] for c in ref.execute(f"PRAGMA table_info({name!r})")}
+                have = {c[1] for c in self.db.execute(f"PRAGMA table_info({name!r})").fetchall()}
+                if not want or not want <= have:
+                    return False
+            return True
+        finally:
+            ref.close()
 
     @contextmanager
     def tx(self) -> Iterator[_LockedDB]:

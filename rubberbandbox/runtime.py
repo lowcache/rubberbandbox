@@ -99,15 +99,20 @@ class Runtime:
         self._lock = _lock if _lock is not None or not path else daemon_lock(path)  # in-memory: nothing to share
         try:
             with self.store.tx() as db:
-                for source, delivery_id in db.execute(
-                    "SELECT source, delivery_id FROM inbound_seen WHERE status='processing'"
+                for source, delivery_id, at in db.execute(
+                    "SELECT source, delivery_id, at FROM inbound_seen WHERE status='processing'"
                 ).fetchall():
                     db.execute(
                         "UPDATE inbound_seen SET status='quarantined' WHERE source=? AND delivery_id=?",
                         (source, delivery_id),
                     )
+                    raw = db.execute(  # the text receive() stored before the interruption, if it got that far
+                        "SELECT json_extract(detail, '$.raw') FROM audit WHERE event='inbound' AND at>=? "
+                        "AND json_extract(detail, '$.delivery')=? ORDER BY seq LIMIT 1", (at, delivery_id),
+                    ).fetchone()
                     self.store.audit(sandbox.clock(), "inbound.interrupted", source=source, delivery_id=delivery_id)
-                    sandbox.approvals.notice("quarantined", f"runtime/{source}", None, sandbox.clock())
+                    sandbox.approvals.notice("quarantined", f"runtime/{source}", raw[0] if raw else None,
+                                             sandbox.clock())
         except BaseException:
             self.close()
             raise
@@ -178,10 +183,16 @@ class Runtime:
                 "INSERT INTO sources (name, cursor) VALUES (?,?) ON CONFLICT(name) DO UPDATE SET cursor=excluded.cursor",
                 (source.name, cursor),
             )
-        sb.tick()
-        digest = sb.digest()
-        if digest is not None:
-            store.db.execute("INSERT INTO digests (at, body) VALUES (?,?)", (sb.clock(), render_digest(digest)))
+        try:  # a failing dispatch sends nothing; the daemon keeps polling and says so
+            sb.tick()
+        except Exception as exc:
+            store.audit(sb.clock(), "runtime.error", stage="tick", error=repr(exc))
+        try:
+            digest = sb.digest()
+            if digest is not None:
+                store.db.execute("INSERT INTO digests (at, body) VALUES (?,?)", (sb.clock(), render_digest(digest)))
+        except Exception as exc:
+            store.audit(sb.clock(), "runtime.error", stage="digest", error=repr(exc))
 
     def run_forever(self, stop: threading.Event, interval: float) -> None:
         while not stop.is_set():

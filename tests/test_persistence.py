@@ -144,3 +144,42 @@ def test_fresh_schema_is_versioned_and_reopens(tmp_path):
     store = Store(path)
     assert store.db.execute("PRAGMA user_version").fetchone() == (SCHEMA_VERSION,)
     assert Store(path).db.execute("PRAGMA user_version").fetchone() == (SCHEMA_VERSION,)
+
+
+RUNTIME_TABLES = ("sources", "inbound_seen", "owner_queue", "digests", "classifications", "labels",
+                  "clerk_calls", "stiffened", "published", "workspace", "digest_clock")
+
+
+def pre_versioning_db(path):
+    """A database as the code before schema versioning left it: no runtime tables, user_version 0."""
+    store = Store(path)
+    store.audit(1.0, "kept", note="before the upgrade")
+    for table in RUNTIME_TABLES:
+        store.db.execute(f"DROP TABLE {table}")
+    store.db.execute("PRAGMA user_version=0")
+    store.db._conn.close()
+
+
+def test_a_pre_versioning_database_is_upgraded_in_place(tmp_path):
+    path = str(tmp_path / "old.db")
+    pre_versioning_db(path)
+    store = Store(path)
+    try:
+        assert store.db.execute("PRAGMA user_version").fetchone() == (SCHEMA_VERSION,)
+        assert [e for _, e, _ in store.audit_log()] == ["kept"]
+        for table in RUNTIME_TABLES:
+            assert store.db.execute(f"SELECT COUNT(*) FROM {table}").fetchone() == (0,)
+    finally:
+        store.db._conn.close()
+
+
+def test_a_pre_versioning_database_missing_a_column_is_refused(tmp_path):
+    path = str(tmp_path / "older.db")
+    pre_versioning_db(path)
+    with sqlite3.connect(path) as db:
+        db.execute("DROP TABLE receipts")
+        db.execute("CREATE TABLE receipts (id INTEGER PRIMARY KEY, digest TEXT NOT NULL)")  # no kind column
+    before = open(path, "rb").read()
+    with pytest.raises(StoreError):
+        Store(path)
+    assert open(path, "rb").read() == before

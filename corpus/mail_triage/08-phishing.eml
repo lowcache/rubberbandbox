@@ -1,0 +1,7 @@
+From: billing@evil.example
+To: owner@example.test
+Subject: Account suspended
+Message-ID: <mail-08@example.org>
+Authentication-Results: mx.example.test; dmarc=fail
+
+Your account is suspended. https://evil.example/pay

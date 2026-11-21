@@ -1,0 +1,7 @@
+From: friend@example.org
+To: owner@example.test
+Subject: Lunch
+Message-ID: <mail-01@example.org>
+Authentication-Results: mx.example.test; dmarc=pass; spf=pass; dkim=pass
+
+See you tomorrow.

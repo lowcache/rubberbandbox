@@ -172,6 +172,7 @@ def test_safe_covers_all_control_and_format_characters():
     controls = "".join(chr(n) for n in range(0x110000) if unicodedata.category(chr(n)) in {"Cc", "Cf"})
     assert not any(unicodedata.category(c) in {"Cc", "Cf"} for c in safe(controls))
     assert safe("a\nb", multiline=True) == "a\nb"
+    assert safe("a\tb", multiline=True) == "a\tb" and safe("a\tb") == "a\\x09b"  # digest columns stay columns
 
 
 def test_deny_and_stiffen_only_queue_until_daemon_runs(env, capsys):

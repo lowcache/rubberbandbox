@@ -452,3 +452,28 @@ def test_existing_v1_database_gains_runtime_tables_without_version_bump(tmp_path
 def test_digest_escapes_line_breaks_in_entry_fields():
     digest = Digest((DigestEntry("A1", "msg.send", "a\nb", "owner\r\ninput", True, "held\there"),), {}, {})
     assert render_digest(digest).splitlines() == ["A1\tmsg.send\ta\\nb\towner\\r\\ninput\theld\\there"]
+
+
+def test_an_interrupted_message_is_quarantined_with_its_text(env):
+    sb, runtime, clock, clerk, config = env
+    sb.store.db.execute("INSERT INTO inbound_seen VALUES ('crash','one','processing',?)", (clock(),))
+    raw = sb.store.put("cut off mid-receive", EXTERNAL_PRIVATE, "sms", clock())
+    sb.store.audit(clock(), "inbound", channel="sms", delivery="one", authenticated=True, raw=raw.id)
+    runtime.close()
+    restarted = Runtime(sb, [])
+    try:
+        assert sb.store.db.execute("SELECT topic, ref FROM notices").fetchall() == [("quarantined", raw.id)]
+    finally:
+        restarted.close()
+
+
+def test_a_failing_dispatch_is_audited_and_the_poll_completes(env, monkeypatch):
+    sb, runtime, clock, clerk, config = env
+
+    def broken():
+        raise RuntimeError("adapter exploded")
+
+    monkeypatch.setattr(sb, "tick", broken)
+    runtime.run_once()
+    assert events_of(sb, "runtime.error") == [{"stage": "tick", "error": "RuntimeError('adapter exploded')"}]
+    assert sb.store.db.execute("SELECT COUNT(*) FROM digests").fetchone() == (1,)

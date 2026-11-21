@@ -19,7 +19,7 @@ def safe(s: object, *, multiline: bool = False) -> str:
     text = str(s)
     return "".join(
         (f"\\x{ord(c):02x}" if ord(c) <= 255 else f"\\u{ord(c):04x}")
-        if unicodedata.category(c) in {"Cc", "Cf"} and not (multiline and c == "\n") else c
+        if unicodedata.category(c) in {"Cc", "Cf"} and not (multiline and c in "\n\t") else c
         for c in text
     )
 
