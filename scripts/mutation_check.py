@@ -173,6 +173,18 @@ MUTANTS = {
   'imap ssl certificates unverified': ('rubberbandbox/mail.py', 'ssl_context=ssl.create_default_context()', 'ssl_context=ssl._create_unverified_context()'),
   'imap cursor uid refetched': ('rubberbandbox/mail.py', 'if u > start)', 'if True)'),
   'imap parse error not malformed': ('rubberbandbox/mail.py', '                    items.append(Malformed(uid, f"{self.mailbox} uid {uid}", repr(exc)))', '                    raise'),
+  'secret file keeps its newline': ('rubberbandbox/config.py', '.read_text(encoding="utf-8").rstrip("\\r\\n")', '.read_text(encoding="utf-8")'),
+  'reset-cursor accepts unknown sources': ('rubberbandbox/console.py', '            if args.source not in {s.name for s in config.sources}:', '            if False:'),
+  'deleted thunderbird messages ingested': ('rubberbandbox/mail.py', '                if int((message.get("X-Mozilla-Status") or "0").strip(), 16) & _DELETED:', '                if False:'),
+  'half-written mbox tail taken': ('rubberbandbox/mail.py', '                if current is not None and size == seen:', '                if current is not None:'),
+  'thunderbird folder follows symlinks': ('rubberbandbox/mail.py', 'os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC', 'os.O_RDONLY | os.O_CLOEXEC'),
+  'compacted folder read at a stale offset': ('rubberbandbox/mail.py', '            elif int(parts[0]) != ino:', '            elif False:'),
+  'in-place rewrite read at a stale offset': ('rubberbandbox/mail.py', '            if head and head != b"From ":', '            if False:'),
+  'thunderbird batch ignored': ('rubberbandbox/mail.py', '                        if len(messages) >= self.batch:', '                        if False:'),
+  'mbox quoting kept': ('rubberbandbox/mail.py', '                raw = re.sub(rb"(?m)^>(>*From )", rb"\\1", raw)', '                pass'),
+  'thunderbird backfill ignored': ('rubberbandbox/mail.py', '        return starts[0] if count and starts else pos', '        return pos'),
+  'truncated folder read at a stale offset': ('rubberbandbox/mail.py', '            elif int(parts[1]) > st.st_size:', '            elif False:'),
+  'non-mbox folder accepted': ('rubberbandbox/mail.py', '            if st.st_size and f.read(5) != b"From ":', '            if False:'),
 }
 caught = 0
 for name, (path, old, new) in MUTANTS.items():

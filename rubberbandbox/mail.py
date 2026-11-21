@@ -5,10 +5,12 @@ import email
 import email.policy
 import hashlib
 import imaplib
+import os
 import re
 import ssl
 import time
 from email.header import decode_header, make_header
+from collections import deque
 from email.utils import getaddresses
 from html import unescape
 from pathlib import Path
@@ -83,6 +85,87 @@ class EmlSource:
             except Exception as exc:
                 items.append(Malformed(0, name, repr(exc)))
         return items, (pending[-1] if pending else cursor)
+
+
+_DELETED = 0x0008  # Thunderbird's X-Mozilla-Status bit for a message deleted but not yet compacted away
+RESCAN = 100  # after a compaction, re-read this many newest messages; repeats are dropped by Message-ID
+
+
+class ThunderbirdSource:
+    """One folder of a Thunderbird mbox store (e.g. ImapMail/<server>/INBOX), read-only. Thunderbird keeps
+    the account's login and sync; this source holds no credential and opens nothing but this file (never
+    through a symlink at the file itself; parent directories are the owner's configured path)."""
+
+    def __init__(self, name: str, path: str, *, authserv_id: str, include_body: bool = False, backfill: int = 0,
+                 batch: int = 50, clock=time.time) -> None:
+        self.name, self.path, self.authserv_id, self.include_body = name, path, authserv_id, include_body
+        self.backfill, self.batch, self.clock = backfill, batch, clock
+
+    def poll(self, cursor: str | None):
+        """Cursor 'inode:offset:size'. A replaced or rewritten file (compaction) is rescanned from the start;
+        messages already seen are dropped by their Message-ID. The last message is taken only once another
+        follows it or the file has stopped growing since the previous poll, so a half-written one waits."""
+        fd = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        with os.fdopen(fd, "rb") as f:
+            st = os.fstat(f.fileno())
+            ino = st.st_ino
+            if st.st_size and f.read(5) != b"From ":  # e.g. INBOX.msf configured by mistake: say so every poll
+                raise ValueError(f"{self.path} is not an mbox folder")
+            parts = cursor.split(":") if cursor else None
+            if parts is None:
+                offset, seen = self._start(f, self.backfill), -1
+            elif int(parts[0]) != ino:  # replaced by a compaction: resume within the newest messages
+                offset, seen = self._start(f, max(self.backfill, RESCAN)), -1
+            elif int(parts[1]) > st.st_size:  # truncated below the cursor on the same file
+                offset, seen = self._start(f, max(self.backfill, RESCAN)), -1
+            else:
+                offset, seen = int(parts[1]), int(parts[2])
+            f.seek(offset)
+            head = f.read(5)
+            if head and head != b"From ":  # rewritten in place under us
+                offset, seen = self._start(f, max(self.backfill, RESCAN)), -1
+            f.seek(offset)
+            messages, current, start, pos, size = [], None, offset, offset, -1  # size -1: not read to the end
+            for line in f:
+                if line.startswith(b"From "):
+                    if current is not None:
+                        messages.append((start, pos, b"".join(current)))
+                        if len(messages) >= self.batch:
+                            break
+                    current, start = [], pos
+                elif current is not None:
+                    current.append(line)
+                pos += len(line)
+            else:
+                size = pos
+                if current is not None and size == seen:  # nothing appended since last poll: the tail is whole
+                    messages.append((start, pos, b"".join(current)))
+        items, done = [], offset
+        for start, end, raw in messages:
+            done = end
+            try:
+                message = email.message_from_bytes(raw[:4096], policy=email.policy.compat32)
+                if int((message.get("X-Mozilla-Status") or "0").strip(), 16) & _DELETED:
+                    continue
+                raw = re.sub(rb"(?m)^>(>*From )", rb"\1", raw)  # undo mbox quoting of body lines
+                items.append(parse(raw, authserv_id=self.authserv_id, include_body=self.include_body,
+                                   received_at=self.clock()))
+            except Exception as exc:  # quarantined by the runtime; never retried, never stalls the folder
+                items.append(Malformed(start, f"{self.path} offset {start}", repr(exc)))
+        return items, f"{ino}:{done}:{size}"
+
+    @staticmethod
+    def _start(f, count: int) -> int:
+        """Offset `count` messages before the end. Scans the whole file once (O(size) I/O) but holds only
+        `count` offsets, so a large folder is never held in memory."""
+        f.seek(0)
+        starts: deque[int] = deque(maxlen=max(count, 1))
+        pos = 0
+        for line in f:
+            if line.startswith(b"From "):
+                starts.append(pos)
+            pos += len(line)
+        return starts[0] if count and starts else pos
 
 
 class ImapSource:

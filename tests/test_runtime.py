@@ -308,7 +308,7 @@ def test_config_defaults_jsonl_and_secret_references(tmp_path, monkeypatch):
     monkeypatch.setenv("RBB_TEST_KEY", "external secret")
     assert resolve_secret({"api_key_env": "RBB_TEST_KEY"}, "api_key") == "external secret"
     file = tmp_path / "secret"
-    file.write_text("file secret")
+    file.write_text("file secret\n")  # the final newline every editor and echo adds is not part of it
     assert resolve_secret({"password_file": str(file)}, "password") == "file secret"
     with pytest.raises(ConfigError):
         resolve_secret({}, "missing")

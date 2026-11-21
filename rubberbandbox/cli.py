@@ -26,7 +26,7 @@ def _colorize(line: str) -> str:
 
 def main(argv: list[str]) -> int:
     cmd = argv[0] if argv else "attacks"
-    if cmd in {"digest", "pending", "quarantine", "approve", "deny", "stiffen", "queue", "sample", "label", "metrics"}:
+    if cmd in {"digest", "pending", "quarantine", "approve", "deny", "stiffen", "queue", "sample", "label", "metrics", "reset-cursor"}:
         from rubberbandbox.console import main as console_main
 
         return console_main(argv)

@@ -203,3 +203,16 @@ def test_default_limits_are_twenty_newest_records(env, capsys):
         lines = capsys.readouterr().out.splitlines()
         assert len(lines) == 20
         assert [int(line.split("\t")[0]) for line in lines] == list(range(21, 1, -1))
+
+
+def test_reset_cursor_clears_one_known_source_and_audits_it(env, capsys):
+    sb, _, _, path, config = env
+    sb.store.db.execute("INSERT INTO sources (name, cursor) VALUES ('imap', '77:9'), ('other', '5')")
+    path.write_text(path.read_text() + '[[source]]\nkind = "jsonl"\nname = "imap"\npath = "x"\n')
+    assert run(env, "reset-cursor", "imap") == 0
+    assert capsys.readouterr().out == "imap\treset\n"
+    assert sb.store.db.execute("SELECT name, cursor FROM sources").fetchall() == [("other", "5")]
+    assert [d for _, e, d in sb.store.audit_log() if e == "source.reset"] == [{"source": "imap"}]
+    with pytest.raises(SystemExit) as exc:
+        run(env, "reset-cursor", "nope")
+    assert exc.value.code == 2

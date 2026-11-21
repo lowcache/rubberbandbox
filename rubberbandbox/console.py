@@ -51,6 +51,8 @@ def main(argv: list[str]) -> int:
         parser.add_argument("label")
     elif command == "metrics":
         parser.add_argument("--field", required=True)
+    elif command == "reset-cursor":
+        parser.add_argument("source")
     args = parser.parse_args(argv[1:])
     config = load(args.config)
     if not os.path.isfile(config.db):  # never create a stray database at a mistyped path
@@ -79,6 +81,14 @@ def main(argv: list[str]) -> int:
             _line(args.raw, args.label)
         elif command == "metrics":
             _metrics(store, args.field)
+        elif command == "reset-cursor":
+            # Safe to repeat: the source refetches its backfill window and every message already seen
+            # is skipped by its delivery id. The daemon reads the cursor afresh on each poll.
+            if args.source not in {s.name for s in config.sources}:
+                parser.error("unknown source")
+            cur = store.db.execute("DELETE FROM sources WHERE name=?", (args.source,))
+            store.audit(time.time(), "source.reset", source=args.source)
+            _line(args.source, "reset" if cur.rowcount else "no cursor")
         elif command == "digest":
             row = store.db.execute("SELECT at, body FROM digests ORDER BY at DESC, id DESC LIMIT 1").fetchone()
             if row is None:

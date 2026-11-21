@@ -14,7 +14,7 @@ from .core.approvals import DigestConfig
 from .core.sandbox import ClerkBudget, Mount, Sandbox
 from .packs.messaging import CLERK_GUIDE, KINDS, SCHEMA, KeywordClerk, MessagingPack
 from .packs.triage import CLERK_GUIDE as TRIAGE_GUIDE, KINDS as TRIAGE_KINDS, SCHEMA as TRIAGE_SCHEMA, KeywordTriageClerk, TriagePack
-from .mail import EmlSource, ImapSource
+from .mail import EmlSource, ImapSource, ThunderbirdSource
 from .runtime import JsonlSource, Runtime, ShadowAdapter, daemon_lock
 
 
@@ -69,7 +69,7 @@ def resolve_secret(table: Mapping[str, object], name: str) -> str:
     try:
         if env is not None:
             return os.environ[env]
-        return Path(file).read_text(encoding="utf-8")
+        return Path(file).read_text(encoding="utf-8").rstrip("\r\n")  # editors and echo add a final newline
     except (KeyError, OSError, TypeError) as exc:
         raise ConfigError(f"cannot resolve secret {name}") from exc
 
@@ -137,6 +137,14 @@ def load(path: str) -> Config:
             body = source.get("include_body", False)
             if type(body) is not bool: raise ConfigError("include_body must be boolean")
             configs.append(SourceConfig(_text(source, "name"), "eml", path=_text(source, "path"), authserv_id=_text(source, "authserv_id"), include_body=body))
+        elif source_kind == "thunderbird":
+            _known(source, "[[source]]", {"kind", "name", "path", "authserv_id", "include_body", "backfill"})
+            body, backfill = source.get("include_body", False), source.get("backfill", 0)
+            if type(body) is not bool or type(backfill) is not int or backfill < 0:
+                raise ConfigError("invalid thunderbird source option")
+            configs.append(SourceConfig(_text(source, "name"), "thunderbird", path=_text(source, "path"),
+                                        authserv_id=_text(source, "authserv_id"), include_body=body,
+                                        backfill=backfill))
         elif source_kind == "imap":
             _known(source, "[[source]]", {"kind", "name", "host", "port", "user", "password_env", "password_file", "mailbox", "authserv_id", "include_body", "backfill"})
             body, backfill = source.get("include_body", False), source.get("backfill", 0)
@@ -188,6 +196,9 @@ def build(config: Config) -> tuple[Sandbox, Runtime]:
         for s in config.sources:
             if s.kind == "jsonl": source_objects.append(JsonlSource(s.name, s.path))
             elif s.kind == "eml": source_objects.append(EmlSource(s.name, s.path, authserv_id=s.authserv_id, include_body=s.include_body))
+            elif s.kind == "thunderbird":
+                source_objects.append(ThunderbirdSource(s.name, s.path, authserv_id=s.authserv_id,
+                                                        include_body=s.include_body, backfill=s.backfill))
             else: source_objects.append(ImapSource(s.name, host=s.host, port=s.port, user=s.user,
                                                    password=resolve_secret(s.password_ref, "password"),
                                                    mailbox=s.mailbox, authserv_id=s.authserv_id,
