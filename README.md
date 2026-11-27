@@ -56,7 +56,7 @@ None of the live clerk's four misses went in the direction an injection demanded
 judgment calls on items the corpus author flagged as debatable, and one was a long padded message
 whose price question was diluted. The corpora are small and the attacks are fixed, not adaptive.
 
-**Structural evidence** (400 tests):
+**Structural evidence** (414 tests):
 - Property tests drive a *fully hostile* clerk and *fully hostile* hands, including hands spanning
   two composed packs, against oracles that don't depend on the door's own logic.
 - A mutation check breaks guards one at a time: 168 of 168 caught on the last full run (21 Nov). Four times during
