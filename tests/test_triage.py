@@ -82,3 +82,21 @@ def test_openrouter_clerk_is_built_with_its_model_and_the_triage_guide(tmp_path,
     path.write_text(f'db = "{tmp_path / "other.db"}"\nmode = "shadow"\npack = "triage"\n' + clerk.format("stub", 'model = "x/y"\n'))
     with pytest.raises(ConfigError, match="model applies only"):
         load(path)
+
+
+def test_bulk_merges_spam_and_graymail_and_only_phishing_raises_a_notice(tmp_path, monkeypatch):
+    import json
+    from rubberbandbox.packs.triage.pack import SCHEMA
+    monkeypatch.setattr("rubberbandbox.config.time.time", ManualClock())
+    truth = json.loads((ROOT / "corpus/mail_triage/labels.json").read_text())
+    assert set(truth.values()) == set(SCHEMA.fields["label"].choices) == {"legit", "bulk", "phishing"}
+    config = load(config_file(tmp_path, f'[[source]]\nkind = "eml"\nname = "mail"\npath = "{ROOT / "corpus/mail_triage"}"\n'
+                                         'authserv_id = "mx.example.test"\ninclude_body = true\n'))
+    sb, runtime = build(config)
+    try:
+        runtime.run_once()
+        labels = [json.loads(e)["label"] for (e,) in sb.store.db.execute("SELECT extracted FROM classifications WHERE status='ok'")]
+        topics = {t for (t,) in sb.store.db.execute("SELECT topic FROM notices")}
+        assert "bulk" in labels and "phishing" in labels and topics == {"phishing"}
+    finally:
+        runtime.close(); sb.store.db._conn.close()

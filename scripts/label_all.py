@@ -1,5 +1,5 @@
 """Label every unlabelled classification in a config's database, e.g. a database fed only from Gmail's
-Spam folders: `python scripts/label_all.py <config> spam`. Each label goes through the console's own
+Spam folders: `python scripts/label_all.py <config> bulk`. Each label goes through the console's own
 validation, exactly as if typed by the owner."""
 import sqlite3
 import sys
