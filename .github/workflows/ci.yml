@@ -13,14 +13,20 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Let bubblewrap use unprivileged user namespaces
         run: |
           sudo sysctl -w kernel.unprivileged_userns_clone=1 || true
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
 
-      - name: Full test suite
-        run: nix develop -c python -m pytest -q
+      - name: "Full test suite (a skip fails CI: a missing bwrap must not pass as green)"
+        run: |
+          set -o pipefail
+          nix develop -c python -m pytest -q -rs 2>&1 | tee pytest.log
+          if grep -qE '[0-9]+ skipped' pytest.log; then
+            echo "::error::tests were skipped; CI must run the whole suite"
+            exit 1
+          fi
