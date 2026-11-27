@@ -30,7 +30,7 @@ calls, their path arguments and their network all cross the one door.
 | v1 core | ✅ provenance labels, airlock, expiring scope grants, one door with an independent invariant, public lane, approval digest, append-only audit log, pack composition |
 | Pack wall | ✅ effect manifests · ✅ frozen, versioned manifests with a loosening diff · ✅ MCP stdio adapter · ✅ filesystem box · ✅ network through the door |
 | v1 packs | ✅ messaging (SMS and email) and ✅ coding, both re-expressed as manifests with the original tests unchanged |
-| v1 clerks | ✅ keyword stub · ✅ Claude (API, needs a key) · ✅ Codex (CLI on a ChatGPT plan, locked down and verified on every call) |
+| v1 clerks | ✅ keyword stub · ✅ Claude (API, needs a key) · ✅ Codex (CLI on a ChatGPT plan, locked down and verified on every call) · ✅ OpenRouter (any schema-capable model, tool-less API call; `[clerk] kind = "openrouter"`, `model = …`, needs `OPENROUTER_API_KEY`) |
 | Launch runtime | ✅ shadow-mode daemon (no real sends) · ✅ persisted security state · ✅ owner console over the shared database · ✅ fail-closed clerk budget · ✅ classification metrics · ✅ `.eml` replay source · ✅ Thunderbird folder source (reads the local mail store; holds no mail credential) · read-only IMAP source (tested against a local Dovecot, not yet a live provider) · ✅ mail-triage pack (headers only unless an account opts in) |
 | v1.x | Live manifest drafter, owner-initiated mode (plan-then-execute), real SMS and email adapters, phone approvals, MicroVM deployment, larger adaptive clerk evaluation |
 | v2 | learning immune system (anomaly scorer on a population prior) |

@@ -8,7 +8,9 @@ SCHEMA = Schema("mail.triage", {"label": EnumField("legit", "graymail", "spam", 
 TOOLS = ()
 KINDS = {}
 RULES = Rules(notices={"label": {"phishing": "phishing", "spam": "spam"}}, authenticated_only=False)
-CLERK_GUIDE = """Classify mail. legit is ordinary wanted correspondence. graymail is wanted-once bulk mail such as newsletters and promotions the owner may have signed up for. phishing is impersonation, credential or payment lures. spam is unsolicited bulk with no relationship. Extract up to eight URLs."""
+_URLS = SCHEMA.fields["urls"]
+# The JSON schema cannot carry span bounds, and one out-of-shape URL rejects the whole form; so say them.
+CLERK_GUIDE = f"""Classify mail. legit is ordinary wanted correspondence. graymail is wanted-once bulk mail such as newsletters and promotions the owner may have signed up for. phishing is impersonation, credential or payment lures. spam is unsolicited bulk with no relationship. Extract up to {_URLS.max_items} URLs. Copy only http:// or https:// URLs, never mailto: or other schemes, and skip any URL longer than {_URLS.max_len} characters."""
 
 
 class MailChannel:

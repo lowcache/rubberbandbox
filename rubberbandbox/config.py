@@ -47,6 +47,7 @@ class Config:
     clerk_budget: ClerkBudget
     sources: tuple[SourceConfig, ...]
     pack: str = "messaging"
+    clerk_model: str | None = None
 
 
 def _secrets(value: object) -> None:
@@ -114,10 +115,13 @@ def load(path: str) -> Config:
     if not isinstance(digest, dict) or not isinstance(clerk, dict) or not isinstance(sources, list):
         raise ConfigError("digest and clerk must be tables; source must be an array of tables")
     _known(digest, "[digest]", {"interval", "per_cluster"})
-    _known(clerk, "[clerk]", {"kind", "per_sender", "sender_window", "per_day"})
+    _known(clerk, "[clerk]", {"kind", "model", "per_sender", "sender_window", "per_day"})
     kind = _text(clerk, "kind")
-    if kind not in {"stub", "codex"}:
+    if kind not in {"stub", "codex", "openrouter"}:
         raise ConfigError(f"unknown clerk kind: {kind}")
+    model = _text(clerk, "model") if "model" in clerk else None
+    if model is not None and kind != "openrouter":
+        raise ConfigError("[clerk] model applies only to kind openrouter")
     required = {"per_sender", "sender_window", "per_day"}
     budget = None
     if required <= clerk.keys():
@@ -167,7 +171,7 @@ def load(path: str) -> Config:
     return Config(db, mode, _number(data, "poll_interval", 5.0),
                   DigestConfig(_number(digest, "interval", DigestConfig().interval),
                                _number(digest, "per_cluster", DigestConfig().per_cluster, integer=True)),
-                  kind, budget, tuple(configs), pack)
+                  kind, budget, tuple(configs), pack, model)
 
 
 def build(config: Config) -> tuple[Sandbox, Runtime]:
@@ -183,6 +187,10 @@ def build(config: Config) -> tuple[Sandbox, Runtime]:
         elif config.clerk_kind == "codex":
             from .clerks.codex import CodexClerk
             clerk = CodexClerk(TRIAGE_SCHEMA, TRIAGE_GUIDE) if config.pack == "triage" else CodexClerk(SCHEMA, CLERK_GUIDE)
+        elif config.clerk_kind == "openrouter":
+            from .clerks.openrouter import DEFAULT_MODEL, OpenRouterClerk
+            schema, guide = (TRIAGE_SCHEMA, TRIAGE_GUIDE) if config.pack == "triage" else (SCHEMA, CLERK_GUIDE)
+            clerk = OpenRouterClerk(schema, guide, model=config.clerk_model or DEFAULT_MODEL)
         else:
             raise ConfigError(f"unknown clerk kind: {config.clerk_kind}")
         # Door copies the mapping; bind the shared adapter before the runtime can poll.

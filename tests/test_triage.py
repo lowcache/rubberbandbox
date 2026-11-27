@@ -56,3 +56,29 @@ def test_imap_secret_is_resolved_at_build_not_load(tmp_path):
     config = load(config_file(tmp_path, '[[source]]\nkind = "imap"\nname = "x"\nhost = "h"\nuser = "u"\nauthserv_id = "a"\npassword_env = "UNSET_MAIL_PASSWORD"\n'))
     with pytest.raises(ConfigError, match="cannot resolve secret"):
         build(config)
+
+
+def test_triage_guide_states_the_url_bounds_the_airlock_enforces():
+    from rubberbandbox.packs.triage.pack import CLERK_GUIDE, SCHEMA
+    urls = SCHEMA.fields["urls"]
+    assert f"longer than {urls.max_len} characters" in CLERK_GUIDE and f"up to {urls.max_items} URLs" in CLERK_GUIDE
+    assert "never mailto:" in CLERK_GUIDE
+
+
+def test_openrouter_clerk_is_built_with_its_model_and_the_triage_guide(tmp_path, monkeypatch):
+    from rubberbandbox.clerks.openrouter import OpenRouterClerk
+    from rubberbandbox.packs.triage.pack import CLERK_GUIDE
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    clerk = '[clerk]\nkind = "{}"\n{}per_sender = 2\nsender_window = 60\nper_day = 10\n'
+    path = tmp_path / "runtime.toml"
+    path.write_text(f'db = "{tmp_path / "state.db"}"\nmode = "shadow"\npack = "triage"\n' + clerk.format("openrouter", 'model = "x/y"\n'))
+    sb, runtime = build(load(path))
+    try:
+        mounted = sb.mounts[0].clerk
+        assert isinstance(mounted, OpenRouterClerk) and mounted.model == "x/y" and CLERK_GUIDE in mounted.system
+    finally:
+        runtime.close()
+        sb.store.db._conn.close()
+    path.write_text(f'db = "{tmp_path / "other.db"}"\nmode = "shadow"\npack = "triage"\n' + clerk.format("stub", 'model = "x/y"\n'))
+    with pytest.raises(ConfigError, match="model applies only"):
+        load(path)

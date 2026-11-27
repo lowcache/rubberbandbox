@@ -77,3 +77,11 @@ def test_tool_event_raises_even_with_a_valid_answer():
     run = FakeRunner(events({"type": "command_execution", "command": "cat ~/.ssh/config"}, answer(GOOD)))
     with pytest.raises(ClerkUncertain, match="command_execution"):
         CodexClerk(SCHEMA, runner=run).extract("x")
+
+
+def test_nonzero_exit_reports_the_turn_error_from_stdout():
+    limit = json.dumps({"type": "error", "message": "You've hit your usage limit."})
+    with pytest.raises(ClerkUncertain, match="usage limit"):
+        CodexClerk(SCHEMA, runner=FakeRunner(limit, returncode=1)).extract("x")
+    with pytest.raises(ClerkUncertain, match="boom"):  # no error event: stderr as before
+        CodexClerk(SCHEMA, runner=FakeRunner(events(), returncode=1)).extract("x")

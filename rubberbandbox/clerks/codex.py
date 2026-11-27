@@ -57,8 +57,9 @@ class CodexClerk:
                 self.command(str(workdir), str(schema_path), prompt),
                 stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=self.timeout,
             )
-        if proc.returncode != 0:
-            raise ClerkUncertain(f"codex exited {proc.returncode}: {proc.stderr.strip()[-300:]}")
+        if proc.returncode != 0:  # codex reports turn failures (e.g. usage limits) as stdout events, not stderr
+            failures = [line for line in proc.stdout.splitlines() if '"type":"error"' in line.replace(" ", "")]
+            raise ClerkUncertain(f"codex exited {proc.returncode}: {(failures[-1:] or [proc.stderr.strip()])[0][-300:]}")
         final = None
         for line in proc.stdout.splitlines():
             try:
