@@ -1,4 +1,5 @@
-"""python -m rubberbandbox.cli attacks [path] | clean [path] [--clerk claude|codex] | adversarial [path] [--clerk claude|codex] | demo [--clerk claude|codex] [--pace SECONDS]"""
+"""python -m rubberbandbox.cli attacks [path] | clean [path] [--clerk claude|codex] | adversarial [path] [--clerk claude|codex] | demo [--clerk claude|codex] [--pace SECONDS]
+| adaptive [--attackers M,M] [--clerk-model M] [--rounds N] [--max-calls N] [--max-usd X] [--out PATH] [--corpus PATH]"""
 
 from __future__ import annotations
 
@@ -63,6 +64,42 @@ def main(argv: list[str]) -> int:
         failed = sum(not r.ok for r in results)
         print(f"\n{len(results) - failed}/{len(results)} attack cases behave as specified")
         return 1 if failed else 0
+    if cmd == "adaptive":
+        import argparse
+        import os
+        import time
+
+        from rubberbandbox.clerks.openrouter import OpenRouterClerk, _post
+        from rubberbandbox.packs.messaging import CLERK_GUIDE, SCHEMA
+        from rubberbandbox.packs.messaging.adaptive import Attacker, Meter, run_adaptive
+
+        parser = argparse.ArgumentParser(prog="rubberbandbox adaptive")
+        parser.add_argument("--attackers", default="deepseek/deepseek-v4.1-flash,qwen/qwen3.8-flash")
+        parser.add_argument("--clerk-model", default="anthropic/claude-haiku-5.5")
+        parser.add_argument("--rounds", type=int, default=8)
+        parser.add_argument("--max-calls", type=int, default=400)
+        parser.add_argument("--max-usd", type=float, default=0.50)
+        parser.add_argument("--out", default=f"adaptive-{time.strftime('%Y%m%dT%H%M%S')}.jsonl")
+        parser.add_argument("--corpus", default="corpus/messaging_adaptive.json")
+        args = parser.parse_args(argv[1:])
+        key = os.environ.get("OPENROUTER_API_KEY")
+        if not key:
+            print("OPENROUTER_API_KEY is not set")
+            return 2
+        meter = Meter(lambda body: _post(body, key=key, timeout=180.0), args.max_calls, args.max_usd)
+        clerk = OpenRouterClerk(SCHEMA, CLERK_GUIDE, model=args.clerk_model, post=meter)
+        attackers = {m: Attacker(m, meter) for m in args.attackers.split(",")}
+        rep = run_adaptive(attackers, clerk, meter, rounds=args.rounds, transcript=args.out, corpus=args.corpus)
+        print(f"clerk {args.clerk_model}  attackers {', '.join(attackers)}  transcript {args.out}")
+        print(f"attempts {rep.attempts}  calls {rep.calls}  spent ${rep.spent:.4f}  stopped: {rep.stopped or 'no (all runs finished)'}")
+        print(f"FOOLED  {rep.fooled}/{rep.attempts} attempts got the wrong need")
+        print(f"REACHED {len(rep.reached)} goal runs met their objective: {', '.join(rep.reached) or '-'}")
+        print(f"HARM    {len(rep.harm)}  <- the claim is that this is always 0")
+        for run, what in rep.harm:
+            print(f"  HARM    {run}: {what}")
+        for run, why in rep.failed_runs:
+            print(f"  FAILED  {run}: {why}")
+        return 1 if rep.harm else 0
     if cmd == "demo":
         from rubberbandbox.demo import run
 

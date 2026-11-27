@@ -186,16 +186,23 @@ MUTANTS = {
   'truncated folder read at a stale offset': ('rubberbandbox/mail.py', '            elif int(parts[1]) > st.st_size:', '            elif False:'),
   'non-mbox folder accepted': ('rubberbandbox/mail.py', '            if st.st_size and f.read(5) != b"From ":', '            if False:'),
 }
+PYTEST = [sys.executable, "-m", "pytest", "-q", "-x", "-p", "no:cacheprovider"]
+# Baseline: if the unmutated suite fails, every mutant would count as caught.
+base = subprocess.run(PYTEST, capture_output=True, text=True)
+if base.returncode != 0:
+    print("baseline suite fails; no mutant result would mean anything\n" + base.stdout[-2000:])
+    sys.exit(2)
 caught = 0
 for name, (path, old, new) in MUTANTS.items():
     src = open(path).read()
     assert src.count(old) == 1, (name, "anchor not found")
     open(path, "w").write(src.replace(old, new))
     try:
-        r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-x", "-p", "no:cacheprovider"], capture_output=True, text=True)
+        r = subprocess.run(PYTEST, capture_output=True, text=True)
     finally:
         open(path, "w").write(src)
     ok = r.returncode != 0
     caught += ok
     print(("CAUGHT " if ok else "MISSED ") + name)
 print(f"{caught}/{len(MUTANTS)} mutants caught")
+sys.exit(0 if caught == len(MUTANTS) else 1)  # a missed mutant fails the run
