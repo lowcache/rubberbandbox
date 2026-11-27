@@ -6,7 +6,7 @@ import pytest
 
 from rubberbandbox.clerks.openrouter import OpenRouterClerk
 from rubberbandbox.packs.messaging import CLERK_GUIDE, SCHEMA
-from rubberbandbox.packs.messaging.adaptive import GOALS, BudgetExhausted, Goal, Meter, run_adaptive
+from rubberbandbox.packs.messaging.adaptive import GOALS, RunStopped, Goal, Meter, run_adaptive
 from rubberbandbox.packs.messaging.corpus import SECRET, run_adversarial
 
 FLIP = Goal("price-as-complaint", "price", "flip it", "complaint")
@@ -40,17 +40,17 @@ def run(tmp_path, attackers, clerk=None, meter=None, goals=(FLIP,), rounds=4):
 def test_meter_caps_calls_and_spend_and_stops_when_cost_is_unreported():
     calls = Meter(free(), 2, 10.0)
     calls({}); calls({})
-    with pytest.raises(BudgetExhausted, match="call cap"):
+    with pytest.raises(RunStopped, match="call cap"):
         calls({})
     spend = Meter(free(0.3), 100, 1.0)
     for _ in range(3):
         spend({})
-    with pytest.raises(BudgetExhausted, match="spend cap"):  # 0.9 + dearest 0.3 > 1.0: refused before overshoot
+    with pytest.raises(RunStopped, match="spend cap"):  # 0.9 + dearest 0.3 > 1.0: refused before overshoot
         spend({})
     assert spend.calls == 3 and spend.spent == pytest.approx(0.9)
     blind = Meter(lambda body: {"choices": []}, 100, 1.0)
     blind({})
-    with pytest.raises(BudgetExhausted, match="no cost"):
+    with pytest.raises(RunStopped, match="no cost"):
         blind({})
     errors = Meter(lambda body: {"error": {"code": 429}}, 100, 1.0)
     errors({}); errors({})
@@ -68,7 +68,7 @@ def test_attempts_are_transcribed_and_a_fooling_attempt_becomes_a_regression_cas
     assert [s["to"] for s in fb["sent"]] == [lines[1]["origin"]] and fb["outcomes"]
     assert lines[0]["origin"] != lines[1]["origin"]  # a fresh sender per attempt, so no window drop
     cases = json.loads((tmp_path / "c.json").read_text())
-    assert [c["name"] for c in cases] == ["adaptive-price-as-complaint-a-x-r2"] and cases[0]["expect_need"] == "price"
+    assert [c["name"][:-9] for c in cases] == ["adaptive-price-as-complaint-a-x-r2"] and cases[0]["expect_need"] == "price"
     replay = run_adversarial(str(tmp_path / "c.json"), RuleClerk())
     assert len(replay.fooled) == 1 and replay.harm == []
     run(tmp_path, {"a/x": scripted("How much? COMPLAIN")})  # the same text again is not duplicated
@@ -121,5 +121,40 @@ def test_shipped_attack_corpora_replay_with_zero_harm(name):
     path = Path(__file__).resolve().parent.parent / "corpus" / name
     if not path.exists():
         pytest.skip(f"{name} not generated yet")
+    cases = json.loads(path.read_text())
     rep = run_adversarial(str(path))
-    assert rep.harm == [] and rep.messages == len(json.loads(path.read_text()))
+    assert rep.harm == [] and rep.messages == len(cases) and len({c["name"] for c in cases}) == len(cases)
+
+
+def test_a_network_error_stops_the_whole_run_instead_of_failing_each_goal(tmp_path):
+    def offline(body):
+        raise OSError("connection refused")
+    meter = Meter(offline, 100, 1.0)
+    clerk = OpenRouterClerk(SCHEMA, CLERK_GUIDE, post=meter)
+    rep, lines = run(tmp_path, {"a": scripted("how much?"), "b": scripted("how much?")}, clerk=clerk, meter=meter,
+                     goals=GOALS[:3])
+    assert rep.stopped.startswith("network error") and rep.attempts == 0 and lines == [] and rep.failed_runs == []
+    assert meter.calls == 1  # nothing after the first failure
+
+
+def test_only_a_failed_dns_lookup_is_retried_and_only_within_its_backoff():
+    import socket
+    import urllib.error
+    dns = urllib.error.URLError(socket.gaierror(-3, "Temporary failure in name resolution"))
+    waits, outcomes = [], [dns, dns, {"usage": {"cost": 0.01}}]
+
+    def flaky(body):
+        out = outcomes.pop(0)
+        if isinstance(out, Exception):
+            raise out
+        return out
+    meter = Meter(flaky, 100, 1.0, sleep=waits.append)
+    assert meter({}) == {"usage": {"cost": 0.01}} and waits == [15.0, 60.0] and meter.calls == 1
+    down = Meter(lambda body: (_ for _ in ()).throw(dns), 100, 1.0, sleep=waits.append)
+    with pytest.raises(RunStopped, match="name resolution"):
+        down({})
+    assert waits[2:] == [15.0, 60.0, 180.0]
+    sent = Meter(lambda body: (_ for _ in ()).throw(urllib.error.URLError(TimeoutError("timed out"))), 100, 1.0, sleep=waits.append)
+    with pytest.raises(RunStopped, match="timed out"):  # may have been sent and billed: never retried
+        sent({})
+    assert waits[5:] == []

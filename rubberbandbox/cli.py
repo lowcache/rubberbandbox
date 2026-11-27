@@ -1,5 +1,5 @@
 """python -m rubberbandbox.cli attacks [path] | clean [path] [--clerk claude|codex] | adversarial [path] [--clerk claude|codex] | demo [--clerk claude|codex] [--pace SECONDS]
-| adaptive [--attackers M,M] [--clerk-model M] [--rounds N] [--max-calls N] [--max-usd X] [--out PATH] [--corpus PATH]"""
+| adaptive [--attackers M,M] [--clerk-model M] [--rounds N] [--max-calls N] [--max-usd X] [--out PATH] [--corpus PATH] [--goals G,G]"""
 
 from __future__ import annotations
 
@@ -71,7 +71,7 @@ def main(argv: list[str]) -> int:
 
         from rubberbandbox.clerks.openrouter import OpenRouterClerk, _post
         from rubberbandbox.packs.messaging import CLERK_GUIDE, SCHEMA
-        from rubberbandbox.packs.messaging.adaptive import Attacker, Meter, run_adaptive
+        from rubberbandbox.packs.messaging.adaptive import GOALS, Attacker, Meter, run_adaptive
 
         parser = argparse.ArgumentParser(prog="rubberbandbox adaptive")
         parser.add_argument("--attackers", default="deepseek/deepseek-v4.1-flash,qwen/qwen3.8-flash")
@@ -81,7 +81,15 @@ def main(argv: list[str]) -> int:
         parser.add_argument("--max-usd", type=float, default=0.50)
         parser.add_argument("--out", default=f"adaptive-{time.strftime('%Y%m%dT%H%M%S')}.jsonl")
         parser.add_argument("--corpus", default="corpus/messaging_adaptive.json")
+        parser.add_argument("--goals", help="comma-separated goal names (default: all); each run is independent")
         args = parser.parse_args(argv[1:])
+        goals = GOALS
+        if args.goals:
+            names = args.goals.split(",")
+            unknown = set(names) - {g.name for g in GOALS}
+            if unknown:
+                parser.error(f"unknown goals: {', '.join(sorted(unknown))}")
+            goals = tuple(g for g in GOALS if g.name in names)
         key = os.environ.get("OPENROUTER_API_KEY")
         if not key:
             print("OPENROUTER_API_KEY is not set")
@@ -89,7 +97,7 @@ def main(argv: list[str]) -> int:
         meter = Meter(lambda body: _post(body, key=key, timeout=180.0), args.max_calls, args.max_usd)
         clerk = OpenRouterClerk(SCHEMA, CLERK_GUIDE, model=args.clerk_model, post=meter)
         attackers = {m: Attacker(m, meter) for m in args.attackers.split(",")}
-        rep = run_adaptive(attackers, clerk, meter, rounds=args.rounds, transcript=args.out, corpus=args.corpus)
+        rep = run_adaptive(attackers, clerk, meter, goals=goals, rounds=args.rounds, transcript=args.out, corpus=args.corpus)
         print(f"clerk {args.clerk_model}  attackers {', '.join(attackers)}  transcript {args.out}")
         print(f"attempts {rep.attempts}  calls {rep.calls}  spent ${rep.spent:.4f}  stopped: {rep.stopped or 'no (all runs finished)'}")
         print(f"FOOLED  {rep.fooled}/{rep.attempts} attempts got the wrong need")

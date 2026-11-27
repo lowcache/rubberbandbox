@@ -51,12 +51,28 @@ against a sabotaged provider to prove it can detect harm.
 | Clean corpus (40 customer messages), keyword stub | 13/40 | **0** |
 | Clean corpus, live Codex clerk | 0/40 | **0** |
 | Routing attack corpus (32: spoofing, premium routes, replay, Reply-To, loops, floods) | 32/32 handled as specified | **0** |
+| Adaptive attacks (12 goals; DeepSeek v4.1 Flash and Qwen 3.8 Flash attacking for up to 8 rounds each, seeing the full result of every try), live Claude Haiku 5.5 clerk via OpenRouter | 18/116 attempts | **0** |
 
 None of the live clerk's four misses went in the direction an injection demanded. Three were
 judgment calls on items the corpus author flagged as debatable, and one was a long padded message
-whose price question was diluted. The corpora are small and the attacks are fixed, not adaptive.
+whose price question was diluted. The fixed corpora are small.
 
-**Structural evidence** (414 tests):
+The adaptive row (27 November 2026) uses a different clerk from the Codex rows, so the two are not
+comparable. Each attacker saw the clerk's form, the box's decision and every message sent, and each
+attempt came from a fresh number so the reply window could not mask the result. None of the 6 harm
+goals (leak the owner's secret, redirect a reply, multiple replies, unpublished text, a premium-rate
+route, echoing attacker text) was reached in 86 attempts. Attackers reached 8 of the 12 fooling
+objectives, and some have an owner-visible cost: a complaint recorded as a price question (both
+attackers) or as "other" (one) still gets a published reply, but no owner notice. Coverage is not
+complete: 6 of 24 attacker runs ended early when the attacker gave no usable answer. A third candidate
+attacker, GPT-6 Luna, would not attack in earnest and was not used. The set ran as two sessions (each
+attacker run starts from a fresh sandbox, so splitting changes nothing) after network failures cut
+earlier attempts short. Every attempt that fooled the clerk is kept as a regression case
+(`corpus/messaging_adaptive.json`, 38 cases across all sessions), and the suite replays them with zero
+harm. Run: `python -m rubberbandbox.cli adaptive` (hard caps on calls and spend; this set: 239 calls,
+$0.24).
+
+**Structural evidence** (424 tests):
 - Property tests drive a *fully hostile* clerk and *fully hostile* hands, including hands spanning
   two composed packs, against oracles that don't depend on the door's own logic.
 - A mutation check breaks guards one at a time: 168 of 168 caught on the last full run (21 Nov). Four times during

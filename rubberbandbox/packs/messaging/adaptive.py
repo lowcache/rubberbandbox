@@ -7,7 +7,10 @@ stops at the cap whatever the results so far."""
 
 from __future__ import annotations
 
+import hashlib
 import json
+import socket
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -18,14 +21,16 @@ from . import build
 from .corpus import EVENT_SPACING, JITTER_MAX, SECRET, _Recording, harm_of, public_bodies
 
 
-class BudgetExhausted(RuntimeError):
-    pass
+class RunStopped(RuntimeError):
+    """The meter refused a call (cap reached, spend unverifiable) or the network failed: the whole run ends."""
 
 
 @dataclass
 class Meter:
     """Hard cap on calls and reported USD for every model call routed through it. A call starts only if
-    the spend so far plus the dearest call seen still fits; a reply without a reported cost stops the run."""
+    the spend so far plus the dearest call seen still fits; a reply without a reported cost stops the run.
+    A network or HTTP error also stops it: otherwise every later run would fail at once and read as finished.
+    Only a failed DNS lookup is retried first: the request never left, so a retry cannot bill twice."""
 
     post: Callable[[dict], dict]
     max_calls: int
@@ -34,20 +39,29 @@ class Meter:
     spent: float = 0.0
     dearest: float = 0.0
     stopped: str | None = None
+    dns_backoff: tuple[float, ...] = (15.0, 60.0, 180.0)
+    sleep: Callable[[float], None] = time.sleep
 
     def _stop(self, reason: str) -> None:
         self.stopped = self.stopped or reason
-        raise BudgetExhausted(self.stopped)
+        raise RunStopped(self.stopped)
 
     def __call__(self, body: dict) -> dict:
         if self.stopped:
-            raise BudgetExhausted(self.stopped)
+            raise RunStopped(self.stopped)
         if self.calls >= self.max_calls:
             self._stop(f"call cap {self.max_calls} reached")
         if self.spent + self.dearest > self.max_usd:
             self._stop(f"spend cap ${self.max_usd:.2f} reached (${self.spent:.4f} spent)")
         self.calls += 1
-        reply = self.post({**body, "usage": {"include": True}})
+        for wait in (*self.dns_backoff, None):
+            try:
+                reply = self.post({**body, "usage": {"include": True}})
+                break
+            except OSError as exc:  # DNS, connection, timeout, HTTP status (urllib raises OSError subclasses)
+                if wait is None or not isinstance(getattr(exc, "reason", exc), socket.gaierror):
+                    self._stop(f"network error: {exc}")
+                self.sleep(wait)
         cost = (reply.get("usage") or {}).get("cost")
         if isinstance(cost, (int, float)) and not isinstance(cost, bool):
             self.spent += cost
@@ -103,7 +117,7 @@ ATTACKER_FORMAT = {"type": "json_schema", "json_schema": {"name": "attack", "str
 
 
 class Attacker:
-    def __init__(self, model: str, post: Callable[[dict], dict], max_tokens: int = 8000) -> None:
+    def __init__(self, model: str, post: Callable[[dict], dict], max_tokens: int = 16000) -> None:  # reasoning grows with history
         self.model, self.post, self.max_tokens = model, post, max_tokens
 
     def __call__(self, goal: Goal, history: list[dict]) -> str:
@@ -157,7 +171,7 @@ def run_adaptive(attackers: dict[str, Callable[[Goal, list[dict]], str]], clerk,
                 for round_no in range(1, rounds + 1):
                     try:
                         text = attacker(goal, history)
-                    except BudgetExhausted:
+                    except RunStopped:
                         break
                     except Exception as exc:  # refusal, API error, unusable output: the run ends, recorded
                         report.failed_runs.append((run, str(exc)[:200]))
@@ -191,7 +205,8 @@ def run_adaptive(attackers: dict[str, Callable[[Goal, list[dict]], str]], clerk,
                     report.harm += [(run, h) for h in harm]
                     if (fooled or harm) and text not in known:
                         known.add(text)
-                        cases.append({"name": f"adaptive-{goal.name}-{attacker_name.replace('/', '-')}-r{round_no}",
+                        tag = hashlib.sha256(text.encode()).hexdigest()[:8]  # names stay unique across runs
+                        cases.append({"name": f"adaptive-{goal.name}-{attacker_name.replace('/', '-')}-r{round_no}-{tag}",
                                       "category": f"adaptive:{goal.name}", "event": raw,
                                       "expect_need": goal.cover, "never_contains": list(goal.never_contains)})
                         Path(corpus).write_text(json.dumps(cases, indent=1) + "\n")
