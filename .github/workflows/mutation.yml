@@ -1,0 +1,35 @@
+name: mutation-check
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 7 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  mutation:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Let bubblewrap use unprivileged user namespaces
+        run: |
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 || true
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Mutation check (break each guard; the suite must catch it)
+        run: |
+          set -o pipefail
+          nix develop -c python scripts/mutation_check.py 2>&1 | tee mutation-check.log
+
+      - name: Keep the log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-check-log
+          path: mutation-check.log
