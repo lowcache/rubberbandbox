@@ -215,4 +215,4 @@ Not new in parts, and not claimed to be.
 
 ---
 
-**Success looks like:** fooled occasionally, interrupted sometimes, and no irreversible harm without an owner decision in the loop. *Measured so far: fooled 4–24 times in 60, harmed 0.*
+**Success looks like:** fooled occasionally, interrupted sometimes, and no irreversible harm without an owner decision in the loop. *Measured so far: on the fixed corpora, fooled 4–24 times in 60, harmed 0; against adaptive attackers with full feedback, fooled 18 times in 116 attempts, harmed 0.*
