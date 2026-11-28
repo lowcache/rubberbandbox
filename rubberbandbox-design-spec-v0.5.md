@@ -164,8 +164,9 @@ A box has no network unless the owner enables it, and then only one route: a CON
 - **v1 — built (reference implementation).**
   - **Core:** provenance labels, airlock, scope grants, the door and its invariant, the public lane, the approval digest, an append-only audit log, and pack composition.
   - **Packs:** messaging (SMS and email) and coding, the second written by a separate author against the public API with zero core edits; both since re-expressed as manifests with their original tests unchanged.
-  - **Clerks:** keyword stub, Claude (API), Codex (CLI, locked down).
+  - **Clerks:** keyword stub, Claude (API), Codex (CLI, locked down), OpenRouter (any schema-capable model, tool-less API call).
 - **Pack wall — built.** Effect manifests; frozen, versioned manifests with the loosening diff; the MCP stdio adapter; the filesystem box with reviewed commits; network through the door.
+- **Launch runtime — built, shadow mode only.** A daemon that never transmits (it audits what it would have sent); persisted security state; an owner console over the shared database; a fail-closed clerk budget; classification metrics; `.eml`, Thunderbird-folder and read-only IMAP sources; a headers-only mail-triage pack.
 - **v1.x — next.**
   - A live manifest drafter (the owner still approves every draft).
   - Remote MCP servers (HTTP transport); today only local stdio servers run.
@@ -178,19 +179,20 @@ A box has no network unless the owner enables it, and then only one route: a CON
 
 ## Evidence
 
-Reference implementation runs, 6 November 2026. *Harm* counts only what the simulated outside world received.
+Reference implementation runs, 6 November 2026 unless dated otherwise. *Harm* counts only what the simulated outside world received.
 
 | Evidence | Result |
 |---|---|
 | Attack corpus (32 routing attacks: spoofing, premium routes, replay, Reply-To, loops, floods) | 32/32 behave as specified |
 | Property tests: fully hostile clerk; fully hostile hands; hostile hands across two composed packs | invariant holds; oracles independent of the door |
-| Mutation check (deliberately broken guards; `scripts/mutation_check.py`) | 12/12 caught (6 Nov); 101/101 after the pack wall (7 Nov); 111/111 (8 Nov); 168/168 with the launch runtime and proxy fixes (21 Nov) |
+| Mutation check (deliberately broken guards; `scripts/mutation_check.py`) | 12/12 caught (6 Nov); 101/101 after the pack wall (7 Nov); 111/111 (8 Nov); 168/168 with the launch runtime and proxy fixes (21 Nov); 180/180 on CI (27 Nov) |
 | Independent correctness reviews (separate model family) | core: 4 defects, each reproduced as a failing test and fixed; each pack-wall slice reviewed, real findings fixed with regression tests |
 | Path canonicaliser vs the kernel's own in-root resolution, inside a real box | Hypothesis-generated trees of files and absolute, relative, looping and dangling links: identical results |
 | Unseen MCP servers, run unchanged in the box | official filesystem server; `server-sequential-thinking`; a Hacker News server fetching live stories through the door on one granted target |
 | Clean corpus, live Codex clerk | fooled 0/40, harm 0 |
 | Adversarial clerk corpus (60, written by a different model family), keyword stub | fooled 24/60, **harm 0** |
 | Adversarial clerk corpus, live Codex clerk | fooled 4/60 (none in an injection's demanded direction), **harm 0** |
+| Adaptive attackers (12 goals, 2 attacker models, up to 8 rounds each with full feedback), live Claude Haiku 5.5 clerk via OpenRouter (27 Nov) | fooled 18/116 attempts, **harm 0**; 6 of 24 attacker runs ended early |
 
 ## Evidence & prior art
 
